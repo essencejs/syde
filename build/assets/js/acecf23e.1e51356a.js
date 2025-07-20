@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunksyde_docs=self.webpackChunksyde_docs||[]).push([[1903],{1912:s=>{s.exports=JSON.parse('{"blogBasePath":"/syde/blog","blogTitle":"Blog","authorsListPath":"/syde/blog/authors"}')}}]);
