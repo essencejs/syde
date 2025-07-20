@@ -6,7 +6,7 @@
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://essencejs.github.io/syde/blog"/>
     <subtitle>ReImagine With Syde Blog</subtitle>
-    <icon>https://essencejs.github.io/syde/img/favicon.ico</icon>
+    <icon>https://essencejs.github.io/syde/img/syde.ico</icon>
     <entry>
         <title type="html"><![CDATA[Welcome]]></title>
         <id>https://essencejs.github.io/syde/blog/welcome</id>
