@@ -1,0 +1,26 @@
+{
+  "id": "Interactions/Binding",
+  "title": "Binding",
+  "description": "Creating a KeyBind",
+  "source": "@site/docs/Interactions/Binding.md",
+  "sourceDirName": "Interactions",
+  "slug": "/Interactions/Binding",
+  "permalink": "/syde/docs/Interactions/Binding",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3,
+  "frontMatter": {
+    "sidebar_position": 3
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "Textual Elements",
+    "permalink": "/syde/docs/Interactions/Textual Elements"
+  },
+  "next": {
+    "title": "Example",
+    "permalink": "/syde/docs/Example"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "Interactions/Textual",
+  "title": "Textual",
+  "description": "",
+  "source": "@site/docs/Interactions/Textual.md",
+  "sourceDirName": "Interactions",
+  "slug": "/Interactions/Textual",
+  "permalink": "/docs/Interactions/Textual",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 2,
+  "frontMatter": {
+    "sidebar_position": 2
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "Elements",
+    "permalink": "/docs/Interactions/Elements"
+  }
+}

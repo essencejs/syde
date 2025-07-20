@@ -1,0 +1,26 @@
+{
+  "id": "Interactions/Textual Elements",
+  "title": "Textual Elements",
+  "description": "Creating a Text Input",
+  "source": "@site/docs/Interactions/Textual Elements.md",
+  "sourceDirName": "Interactions",
+  "slug": "/Interactions/Textual Elements",
+  "permalink": "/syde/docs/Interactions/Textual Elements",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 2,
+  "frontMatter": {
+    "sidebar_position": 2
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "Elements",
+    "permalink": "/syde/docs/Interactions/Elements"
+  },
+  "next": {
+    "title": "Binding",
+    "permalink": "/syde/docs/Interactions/Binding"
+  }
+}

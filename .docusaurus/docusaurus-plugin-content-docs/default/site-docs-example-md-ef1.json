@@ -1,0 +1,19 @@
+{
+  "id": "Example",
+  "title": "Example",
+  "description": "Credits To Server Member In Syde.",
+  "source": "@site/docs/Example.md",
+  "sourceDirName": ".",
+  "slug": "/Example",
+  "permalink": "/syde/docs/Example",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "Binding",
+    "permalink": "/syde/docs/Interactions/Binding"
+  }
+}

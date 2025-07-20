@@ -1,0 +1,26 @@
+{
+  "id": "Initialize/congratulations",
+  "title": "Loading",
+  "description": "You have just learned the basics of Docusaurus and made some changes to the initial template.",
+  "source": "@site/docs/Initialize/congratulations.md",
+  "sourceDirName": "Initialize",
+  "slug": "/Initialize/congratulations",
+  "permalink": "/docs/Initialize/congratulations",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 1,
+  "frontMatter": {
+    "sidebar_position": 1
+  },
+  "sidebar": "tutorialSidebar",
+  "previous": {
+    "title": "Initialize",
+    "permalink": "/docs/category/initialize"
+  },
+  "next": {
+    "title": "Markdown Features",
+    "permalink": "/docs/Initialize/markdown-features"
+  }
+}
