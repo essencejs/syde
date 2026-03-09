@@ -3093,7 +3093,7 @@ function syde:Init(library)
 					Color = ColorPicker.Color;
 					Color2 = ColorPicker.Color2;
 					Linkable = ColorPicker.Linkable;
-					Type = ColorPicker.Type or 'Colorpicker';
+					Type = ColorPicker.Type or 'ColorPicker';
 					GradientPath = ColorPicker.GradientPath;
 					CallBack = ColorPicker.CallBack;
 					SFlag = ColorPicker.SFlag;
