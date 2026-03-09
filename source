@@ -18,6 +18,82 @@ local player =          game:GetService('Players')
 local textservice =     game:GetService('TextService')
 local coregui =         game:GetService("CoreGui")
 
+-- update check
+local update = false
+if update then
+	local updategui = game:GetObjects("rbxassetid://122225389943465")[1]
+	updategui.Parent = coregui
+
+	local cord = '/GzumVvz3QM'
+
+	task.wait(0.5)
+	updategui.Enabled = true
+
+	updategui.main.BackgroundTransparency = 1
+	updategui.main.Size = UDim2.new(0, 150,0, 150)
+	updategui.main.time.TextTransparency = 1
+	updategui.main.info.TextTransparency = 1
+	updategui.main.text.TextLabel.TextTransparency = 1
+	updategui.main.text.more.TextTransparency = 1
+
+	tweenservice:Create(updategui.main, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {Transparency = 0}):Play()
+	tweenservice:Create(updategui.main, TweenInfo.new(0.75, Enum.EasingStyle.Quart), {Size = UDim2.new(0, 350,0, 230)}):Play()
+
+	task.wait(0.07)
+
+	tweenservice:Create(updategui.main.time, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 0}):Play()
+	tweenservice:Create(updategui.main.info, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 0}):Play()
+	task.wait(0.07)
+	tweenservice:Create(updategui.main.text.TextLabel, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 0}):Play()
+	task.wait(0.07)
+	tweenservice:Create(updategui.main.text.more, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 0}):Play()
+
+	local duration = 25
+	local startTime = tick()
+
+	local connection
+	connection = runservice.Heartbeat:Connect(function()
+		local elapsed = tick() - startTime
+		local remaining = math.max(duration - elapsed, 0)
+
+		updategui.main.time.Text = "Destroying in " .. string.format("%.1f", remaining) .. " secs"
+
+		if remaining <= 0 then
+			connection:Disconnect()
+
+			tweenservice:Create(updategui.main.text.TextLabel, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 1}):Play()
+			task.wait(0.07)
+			tweenservice:Create(updategui.main.text.more, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 1}):Play()
+			task.wait(0.2)
+			tweenservice:Create(updategui.main, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {Transparency = 1}):Play()
+			tweenservice:Create(updategui.main, TweenInfo.new(0.75, Enum.EasingStyle.Quart), {Size = UDim2.new(0, 150,0, 130)}):Play()
+			updategui.main.s2.Visible = false
+
+
+
+			task.wait(0.07)
+
+			tweenservice:Create(updategui.main.time, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 1}):Play()
+			tweenservice:Create(updategui.main.info, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), {TextTransparency = 1}):Play()
+
+			task.wait(0.75)
+			updategui:Destroy()
+		end
+	end)
+
+	updategui.main.s2.interact.MouseButton1Click:Connect(function()
+
+		tweenservice:Create(updategui.main.s2.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Color = Color3.fromRGB(74, 255, 33)}):Play()
+		tweenservice:Create(updategui.main.s2.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Transparency = 0}):Play()
+		task.wait(0.5)
+		tweenservice:Create(updategui.main.s2.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Color = Color3.fromRGB(87, 101, 242)}):Play()
+		tweenservice:Create(updategui.main.s2.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Transparency = 0.5}):Play()
+		setclipboard(cord)
+	end)
+end
+
+if update then return end
+
 local Library =         game:GetObjects("rbxassetid://123800669522471")[1]
 local Loader =          game:GetObjects("rbxassetid://110221114597158")[1]
 
@@ -794,6 +870,10 @@ function syde:HidePlaceHolder(instance, placeholder, recursive)
 	end
 end
 
+local rs
+local ss
+local mh = true
+
 
 --@Loader
 do
@@ -1066,6 +1146,7 @@ do
 			local INTERNAL_UUID = ("SYDE-" .. tostring(game.JobId):gsub("-", "") .. tostring(tick())):gsub("%.", "")
 			local PROTECTION_EVENT = Instance.new("BindableEvent")
 			local HttpService = game:GetService("HttpService")
+			
 
 			-- Cleanup old UI 
 			local function deepCleanup()
@@ -1865,6 +1946,9 @@ function openui()
 				tweenservice:Create(glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 0.8}):Play()
 			end
 		end
+		
+		tweenservice:Create(window.shadow.glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 0.9}):Play()
+		tweenservice:Create(window.shadow.glow1, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 0.9}):Play()
 	end
 
 
@@ -1909,6 +1993,9 @@ function closeui()
 			tweenservice:Create(glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 1}):Play()
 		end
 	end
+	
+	tweenservice:Create(window.shadow.glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 1}):Play()
+	tweenservice:Create(window.shadow.glow1, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 1}):Play()
 
 	tweenservice:Create(window.shadow.ImageLabel, TweenInfo.new(0.4, Enum.EasingStyle.Exponential), {ImageTransparency = 1 }):Play()
 	tweenservice:Create(window.resize, TweenInfo.new(0.4, Enum.EasingStyle.Exponential), {ImageTransparency = 1 }):Play()
@@ -1967,6 +2054,10 @@ window.top.functions.close.interact.MouseButton1Click:Connect(function()
 		Title = 'Please Confirm Below.',
 		Content = 'Are You Sure You Want To Close This UI?',
 		ConfimCallBack = function()
+			mh = false
+			rs:Disconnect()
+			ss:Disconnect()
+		--	if not ui.Parent then return end
 			task.wait(1)
 			Library:Destroy()
 		end,
@@ -2049,14 +2140,12 @@ function syde:Init(library)
 		QuickActions = library.QuickActions or false;
 	}
 
-	local mh = true
-
 	-- FPS tracking
 	local lastTime = tick()
 	local frames = 0
 
 	if mh then
-		RunService.RenderStepped:Connect(function()
+		rs = RunService.RenderStepped:Connect(function()
 			-- FPS
 			frames += 1
 			local now = tick()
@@ -2073,6 +2162,7 @@ function syde:Init(library)
 			local hour = tonumber(os.date("%I"))
 			Minihome.info.time.Text = hour .. os.date(":%M")
 		end)
+		
 
 		if MinihomeData.QuickActions == false then
 			ui.minihome.quick.Visible = false
@@ -3003,14 +3093,13 @@ function syde:Init(library)
 					Color = ColorPicker.Color;
 					Color2 = ColorPicker.Color2;
 					Linkable = ColorPicker.Linkable;
-					Type = ColorPicker.Type or 'Default';
+					Type = ColorPicker.Type or 'Colorpicker';
 					GradientPath = ColorPicker.GradientPath;
 					CallBack = ColorPicker.CallBack;
 					SFlag = ColorPicker.SFlag;
 				}
 
 				ColorPicker.Linkable = ColorPicker.Linkable or true
-				data.Type = 'ColorPicker'
 
 				local colorpicker = window.settings.pages.page.ColorPicker:Clone()
 				colorpicker.Visible = true
@@ -3497,12 +3586,12 @@ function syde:Init(library)
 					end
 				end)
 
-				colorpicker.QuickClose.MouseEnter:Connect(function()
+				colorpicker.QuickClose.hitbox.MouseEnter:Connect(function()
 					tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Quint ), { Size = UDim2.new(0, 70,0, 3) }):Play()
 					tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Exponential ), { BackgroundColor3 = Color3.fromRGB(255, 255, 255) }):Play()
 				end)
 
-				colorpicker.QuickClose.MouseLeave:Connect(function()
+				colorpicker.QuickClose.hitbox.MouseLeave:Connect(function()
 					tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Quint ), { Size = UDim2.new(0, 60,0, 3) }):Play()
 					tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Exponential ), { BackgroundColor3 = Color3.fromRGB(33, 33, 33) }):Play()
 				end)
@@ -3581,7 +3670,7 @@ function syde:Init(library)
 					DeBounce = false
 				end
 
-				colorpicker.QuickClose.MouseButton1Click:Connect(function()
+				colorpicker.QuickClose.hitbox.MouseButton1Click:Connect(function()
 					if DeBounce then return end
 					if Open then
 						Open = false
@@ -3589,13 +3678,6 @@ function syde:Init(library)
 					end
 				end)
 
-				colorpicker.QuickClose.MouseButton1Click:Connect(function()
-					if DeBounce then return end
-					if Open then
-						Open = false
-						ClosePicker()
-					end
-				end)
 
 				for _,v in ipairs(colorpicker.HueValues:GetChildren()) do
 					if v:IsA("Frame") then
@@ -4416,6 +4498,8 @@ function syde:Init(library)
 							if not success then
 								warn("[CALLBACK ERROR][" .. Slider.Name .. "]: " .. tostring(errorMsg))
 							end
+							
+							Options.StarterValue = newValue
 						end
 					end
 
@@ -4457,8 +4541,12 @@ function syde:Init(library)
 						end
 					end)
 
-					function Options:Set(NewVal)
+					function Options:Set(NewVal, skipSave)
 						local range = Options.Range[2] - Options.Range[1]
+
+						-- snap value to increment (same logic as UpdateSlider)
+						NewVal = math.floor((NewVal - Options.Range[1]) / Options.Increment + 0.5) * Options.Increment + Options.Range[1]
+
 						local sliderPosition = (NewVal - Options.Range[1]) / range
 
 						Slider.slide.slideframe:TweenSize(
@@ -4475,10 +4563,19 @@ function syde:Init(library)
 							{Size = UDim2.new(sliderPosition, 0, 1, 0)},
 							{Size = UDim2.new(0, 100, 1, 0)},
 							TweenInfo.new(0.85, Enum.EasingStyle.Quint)
-						) 
+						)
 
-						local decimalPlaces = tostring(Options.Increment):match("%.([^0]*)") and #tostring(Options.Increment):match("%.([^0]*)") or 0
-						Slider.v.Text = string.format("<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>", NewVal, Options.Range[2])
+						-- detect decimal places from increment
+						local decimalPlaces = tostring(Options.Increment):match("%.([^0]*)")
+							and #tostring(Options.Increment):match("%.([^0]*)")
+							or 0
+
+						-- update display (decimal safe)
+						Slider.v.Text = string.format(
+							"<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>",
+							NewVal,
+							Options.Range[2]
+						)
 
 						-- Tween title appearance
 						tweenservice:Create(Slider.Title, TweenInfo.new(0.55, Enum.EasingStyle.Exponential), {
@@ -4489,16 +4586,20 @@ function syde:Init(library)
 						local success, result = pcall(function()
 							Options.CallBack(NewVal)
 						end)
+
 						if not success then
-							warn("[CALLBACK ERROR][" .. Slider.Name .. "]: " .. tostring(result))
+							warn(`[ Slider Error: { Slider.Name } ] Callback Error: { result }`)
 						end
 
 						Options.StarterValue = NewVal
 					end
 
 					if Options.SFlag then
-						syde.SettingsFlags[Options.SFlag] = Options
+						if Options.SFlag then
+							syde.SettingsFlags[Options.SFlag] = Options
+						end
 					end
+
 				end
 
 				--[DESC]
@@ -5142,7 +5243,7 @@ function syde:Init(library)
 
 		local startTime = tick()
 
-		syde:AddConnection(runservice.Heartbeat, function()
+		ss = syde:AddConnection(runservice.Heartbeat, function()
 			local uptime = tick() - startTime
 			local formatted = formatTime(uptime)
 			uptimeParagraph:Set("Session Uptime: " .. formatted, 'Session UpTime')
@@ -7038,6 +7139,25 @@ function syde:Init(library)
 
 
 		end
+		
+		function initelement:Section(Title, Icon)
+			local SectionData = {
+				Title = Title
+			}
+
+			local Section =  pages.page.Section:Clone()
+			Section.Visible = true
+			Section.Title.Text = Title
+			Section.Parent = Page
+			Section.Title.Position = UDim2.new(0, 0,0, 0)
+
+			if Icon then
+				Section.icon.Image = 'rbxassetid://'..Icon
+				Section.Title.Position = UDim2.new(0, 25,0, 0)
+			else
+				Section.icon.Visible = false
+			end
+		end
 
 		--@@Dropdown
 		function initelement:Dropdown(Dropdown)
@@ -7369,14 +7489,14 @@ function syde:Init(library)
 				Color = ColorPicker.Color;
 				Color2 = ColorPicker.Color2;
 				Linkable = ColorPicker.Linkable;
-				Type = ColorPicker.Type or 'Default';
+				Type = ColorPicker.Type or 'ColorPicker';
 				GradientPath = ColorPicker.GradientPath;
 				CallBack = ColorPicker.CallBack;
 				Flag = ColorPicker.Flag;
 			}
 
 			ColorPicker.Linkable = ColorPicker.Linkable or true
-			data.Type = 'ColorPicker'
+			
 
 			local colorpicker = pages.page.ColorPicker:Clone()
 			colorpicker.Visible = true
@@ -7879,12 +7999,12 @@ function syde:Init(library)
 				end
 			end)
 
-			colorpicker.QuickClose.MouseEnter:Connect(function()
+			colorpicker.QuickClose.hitbox.MouseEnter:Connect(function()
 				tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Quint ), { Size = UDim2.new(0, 70,0, 3) }):Play()
 				tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Exponential ), { BackgroundColor3 = Color3.fromRGB(255, 255, 255) }):Play()
 			end)
 
-			colorpicker.QuickClose.MouseLeave:Connect(function()
+			colorpicker.QuickClose.hitbox.MouseLeave:Connect(function()
 				tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Quint ), { Size = UDim2.new(0, 60,0, 3) }):Play()
 				tweenservice:Create(colorpicker.QuickClose, TweenInfo.new( 0.8, Enum.EasingStyle.Exponential ), { BackgroundColor3 = Color3.fromRGB(33, 33, 33) }):Play()
 			end)
@@ -7974,13 +8094,14 @@ function syde:Init(library)
 				DeBounce = false
 			end
 
-			colorpicker.QuickClose.MouseButton1Click:Connect(function()
+			colorpicker.QuickClose.hitbox.MouseButton1Click:Connect(function()
 				if DeBounce then return end
 				if Open then
 					Open = false
 					ClosePicker()
 				end
 			end)
+
 
 			for _,v in ipairs(colorpicker.HueValues:GetChildren()) do
 				if v:IsA("Frame") then
@@ -8336,5 +8457,3 @@ function syde:Init(library)
 end
 
 return syde
-
-
