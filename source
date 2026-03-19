@@ -19,7 +19,7 @@ local textservice =     game:GetService('TextService')
 local coregui =         game:GetService("CoreGui")
 
 -- update check
-local update = true
+local update = false
 if update then
 	local updategui = game:GetObjects("rbxassetid://122225389943465")[1]
 	updategui.Parent = coregui
@@ -895,6 +895,7 @@ do
 
 		LOADER.loader.profile.Title.TextTransparency = 1
 		LOADER.loader.profile.ImageTransparency = 1
+		LOADER.loader.profile.Title.Text = Config.Name
 		--	LOADER.load.logo.stroke.UIStroke.Transparency = 1
 
 		local LoaderConfig = {
