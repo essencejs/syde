@@ -19,7 +19,7 @@ local textservice =     game:GetService('TextService')
 local coregui =         game:GetService("CoreGui")
 
 -- update check
-local update = true
+local update = false
 if update then
 	local updategui = game:GetObjects("rbxassetid://122225389943465")[1]
 	updategui.Parent = coregui
@@ -521,6 +521,339 @@ function syde:AddConnection(Type, Callback)
 	end)
 
 	return Connection, Disconnect
+end
+
+--@@Bento
+
+local Bento = {}
+Bento.__index = Bento
+
+-- create layout
+function Bento.new(container, config)
+	local self = setmetatable({}, Bento)
+
+	self.Container = container
+	self.Items = {}
+
+	self.Rows = {} -- NEW (optional manual rows)
+
+	self.Gap = config.Gap or 8
+	self.RightPadding = config.RightPadding or 16
+	self.TweenTime = config.TweenTime or 0.3
+
+	self.OriginalContainerSize = container.Size
+
+	self.Original = {}
+	self.ActiveTweens = {}
+
+	return self
+end
+
+-- NEW (optional)
+function Bento:NewRow()
+	local row = {}
+	table.insert(self.Rows,row)
+	return row
+end
+
+
+-- register frame
+function Bento:AddItem(frame, options, row)
+
+	frame.AnchorPoint = Vector2.new(0,0)
+
+	local item = {
+		Frame = frame,
+		Bottom = options and options.Bottom,
+		Row = row -- NEW
+	}
+
+	self.Original[frame] = {
+		Position = frame.Position,
+		Size = frame.Size
+	}
+
+	table.insert(self.Items,item)
+
+	if row then
+		table.insert(row,item)
+	end
+
+end
+
+-- tween helper
+function Bento:Tween(frame, goal)
+
+	if self.ActiveTweens[frame] then
+		self.ActiveTweens[frame]:Cancel()
+	end
+
+	local tween = tweenservice:Create(
+		frame,
+		TweenInfo.new(
+			self.TweenTime,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		goal
+	)
+
+	self.ActiveTweens[frame] = tween
+	tween:Play()
+
+	tween.Completed:Connect(function()
+		if self.ActiveTweens[frame] == tween then
+			self.ActiveTweens[frame] = nil
+		end
+	end)
+
+end
+
+-- calculate layout
+function Bento:Update()
+
+	local containerWidth = self.Container.AbsoluteSize.X
+
+	local normalItems = {}
+	local bottomItems = {}
+
+	for _,item in ipairs(self.Items) do
+		if item.Bottom then
+			table.insert(bottomItems,item)
+		else
+			table.insert(normalItems,item)
+		end
+	end
+
+
+	---------------------------------
+	-- rows
+	---------------------------------
+
+	local sortedRows = {}
+
+	-- if manual rows exist, use them
+	if #self.Rows > 0 then
+
+		for _,row in ipairs(self.Rows) do
+			table.insert(sortedRows,{
+				Items = row
+			})
+		end
+
+	else
+		-- fallback to original Y-based grouping
+
+		local rows = {}
+
+		for _,item in ipairs(normalItems) do
+
+			local original = self.Original[item.Frame]
+			local y = original.Position.Y.Offset
+
+			rows[y] = rows[y] or {}
+			table.insert(rows[y],item)
+
+		end
+
+		for y,row in pairs(rows) do
+
+			table.insert(sortedRows,{
+				Y = y,
+				Items = row
+			})
+
+		end
+
+		table.sort(sortedRows,function(a,b)
+			return a.Y < b.Y
+		end)
+
+	end
+
+
+
+	---------------------------------
+	-- detect stack mode
+	---------------------------------
+
+	local widestRow = 0
+
+	for _,row in ipairs(sortedRows) do
+
+		local width = 0
+
+		for _,item in ipairs(row.Items) do
+			width += self.Original[item.Frame].Size.X.Offset
+		end
+
+		width += (#row.Items-1) * self.Gap
+
+		if width > widestRow then
+			widestRow = width
+		end
+
+	end
+
+
+	local stacked = widestRow > containerWidth
+
+
+
+	---------------------------------
+	-- STACK MODE
+	---------------------------------
+
+	if stacked then
+
+		local y = 0
+
+		local function stackItem(item)
+
+			local frame = item.Frame
+			local original = self.Original[frame]
+
+			self:Tween(frame,{
+				Position = UDim2.fromOffset(0,y),
+				Size = UDim2.fromOffset(
+					containerWidth - self.RightPadding,
+					original.Size.Y.Offset
+				)
+			})
+
+			y += original.Size.Y.Offset + self.Gap
+
+		end
+
+
+		for _,row in ipairs(sortedRows) do
+			for _,item in ipairs(row.Items) do
+				if not item.Bottom then -- FIX
+					stackItem(item)
+				end
+			end
+		end
+
+		for _,item in ipairs(bottomItems) do
+			stackItem(item)
+		end
+
+
+		self.Container.Size = UDim2.new(
+			self.OriginalContainerSize.X.Scale,
+			self.OriginalContainerSize.X.Offset,
+			0,
+			y - self.Gap
+		)
+
+		return
+	end
+
+
+
+	---------------------------------
+	-- NORMAL MODE
+	---------------------------------
+
+	for _,row in ipairs(sortedRows) do
+
+		table.sort(row.Items,function(a,b)
+
+			local ax = self.Original[a.Frame].Position.X.Offset
+			local bx = self.Original[b.Frame].Position.X.Offset
+
+			return ax < bx
+
+		end)
+
+
+
+		for i,item in ipairs(row.Items) do
+
+			local frame = item.Frame
+			local original = self.Original[frame]
+
+			local currentX = original.Position.X.Offset
+			local height = original.Size.Y.Offset
+
+			local nextItem = row.Items[i+1]
+
+			local width
+
+			if nextItem then
+
+				local nextX =
+					self.Original[nextItem.Frame].Position.X.Offset
+
+				width =
+					nextX
+				- currentX
+				- self.Gap
+
+			else
+
+				width =
+					containerWidth
+				- currentX
+				- self.RightPadding
+
+			end
+
+
+			self:Tween(frame,{
+				Position = original.Position,
+				Size = UDim2.fromOffset(width,height)
+			})
+
+		end
+
+	end
+
+
+
+	-- bottom items stay at original positions
+	for _,item in ipairs(bottomItems) do
+
+		local frame = item.Frame
+		local original = self.Original[frame]
+
+		local width =
+			containerWidth
+		- original.Position.X.Offset
+		- self.RightPadding
+
+		self:Tween(frame,{
+			Position = original.Position,
+			Size = UDim2.fromOffset(width,original.Size.Y.Offset)
+		})
+
+	end
+
+
+
+	self.Container.Size = self.OriginalContainerSize
+
+end
+
+function Bento:Bind()
+
+	local busy = false
+
+	self.Container:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+
+		if busy then return end
+		busy = true
+
+		task.defer(function()
+
+			self:Update()
+
+			busy = false
+
+		end)
+
+	end)
+
 end
 
 function syde:MakeResizable(Dragger, Object, MinSize, Callback, LockAspectRatio)
@@ -1147,7 +1480,7 @@ do
 			local INTERNAL_UUID = ("SYDE-" .. tostring(game.JobId):gsub("-", "") .. tostring(tick())):gsub("%.", "")
 			local PROTECTION_EVENT = Instance.new("BindableEvent")
 			local HttpService = game:GetService("HttpService")
-			
+
 
 			-- Cleanup old UI 
 			local function deepCleanup()
@@ -1369,7 +1702,7 @@ function LoadConfig(Configuration)
 				changed = true
 			end
 		end
-		
+
 		print("Loading Flag:", FlagName, "Value:", SavedValue)
 	end
 
@@ -1947,7 +2280,7 @@ function openui()
 				tweenservice:Create(glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 0.8}):Play()
 			end
 		end
-		
+
 		tweenservice:Create(window.shadow.glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 0.9}):Play()
 		tweenservice:Create(window.shadow.glow1, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 0.9}):Play()
 	end
@@ -1994,7 +2327,7 @@ function closeui()
 			tweenservice:Create(glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 1}):Play()
 		end
 	end
-	
+
 	tweenservice:Create(window.shadow.glow, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 1}):Play()
 	tweenservice:Create(window.shadow.glow1, TweenInfo.new(0.5, Enum.EasingStyle.Exponential),{ImageTransparency = 1}):Play()
 
@@ -2058,7 +2391,7 @@ window.top.functions.close.interact.MouseButton1Click:Connect(function()
 			mh = false
 			rs:Disconnect()
 			ss:Disconnect()
-		--	if not ui.Parent then return end
+			--	if not ui.Parent then return end
 			task.wait(1)
 			Library:Destroy()
 		end,
@@ -2133,8 +2466,15 @@ function syde:Init(library)
 	local Data = {
 		Title = library.Title or "Syde";
 		SubText = library.SubText or "Google";
+		Home = library.Home or {} 
 	}
 
+	-- Now we fill in the missing pieces if they weren't provided
+	Data.Home.Enabled = (Data.Home.Enabled == true) -- Forces true/false
+	Data.Home.hTitle = Data.Home.hTitle or Data.Title
+	Data.Home.hSubText = Data.Home.hSubText or Data.SubText
+	Data.Home.profileImage = Data.Home.profileImage or Data.profileImage
+	
 	local Minihome = ui.minihome
 
 	local MinihomeData = {
@@ -2163,7 +2503,7 @@ function syde:Init(library)
 			local hour = tonumber(os.date("%I"))
 			Minihome.info.time.Text = hour .. os.date(":%M")
 		end)
-		
+
 
 		if MinihomeData.QuickActions == false then
 			ui.minihome.quick.Visible = false
@@ -2350,6 +2690,575 @@ function syde:Init(library)
 	window.user.MouseLeave:Connect(function()
 		tweenservice:Create(window.user.UIStroke, TweenInfo.new(1, Enum.EasingStyle.Quart), {Thickness = 0}):Play()
 	end)
+
+	if Data.Home.Enabled then
+
+		window.pages.home.general.presence.Profile.ImageLabel.Text.Header.Text = Data.Home.hTitle
+		window.pages.home.general.presence.Profile.ImageLabel.Text.Sub.Text = Data.Home.hSubText
+
+		window.pages.home.general.presence.Profile.ImageLabel.Image = 'rbxassetid://'..Data.Home.profileImage
+		window.pages.home.general.presence.wallpaper.Image = 'rbxassetid://'..Data.Home.profileImage
+		
+		local placeId = game.PlaceId
+
+		window.pages.home.general.presence.PlaceID.Text =
+			"Place ID: "..placeId
+
+	--[[	local executor = "Undetected"
+
+		local function detect()
+
+			if identifyexecutor then
+				executor = identifyexecutor()
+
+			elseif getexecutorname then
+				executor = getexecutorname()
+
+			elseif syn then
+				executor = "Synapse X"
+
+			elseif KRNL_LOADED then
+				executor = "KRNL"
+
+			elseif is_sirhurt_closure then
+				executor = "SirHurt"
+
+			elseif pebc_execute then
+				executor = "ProtoSmasher"
+
+			elseif secure_load then
+				executor = "Sentinel"
+
+			elseif OXYGEN_LOADED then
+				executor = "Oxygen U"
+
+			elseif fluxus then
+				executor = "Fluxus"
+
+			elseif is_fluxus_closure then
+				executor = "Fluxus"
+
+			elseif getrenv().Xeno then
+				executor = "Xeno"
+
+			elseif getrenv().Solara then
+				executor = "Solara"
+
+			elseif getgenv().Solara then
+				executor = "Solara"
+
+			elseif getgenv().Xeno then
+				executor = "Xeno"
+
+			elseif SW_LOADED then
+				executor = "Script-Ware"
+
+			elseif is_electron then
+				executor = "Electron"
+
+			elseif getexecutor then
+				executor = getexecutor()
+
+			end
+
+		end
+
+		--	detect()
+
+		local ExecutorUI =
+			window.pages.home.general.presence.Executor
+
+		local Frame = ExecutorUI.Frame
+		local Label = Frame.TextLabel
+
+
+		Label.Text = executor
+
+		task.wait() -- allow TextBounds to update
+
+
+		local textWidth =
+			math.max(Label.TextBounds.X, 40)
+
+		local frameWidth =
+			textWidth + 20
+
+		local containerWidth =
+			frameWidth + 65
+
+
+		TweenService:Create(
+			Label,
+			TweenInfo.new(.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			{
+				Size = UDim2.fromOffset(textWidth, Label.AbsoluteSize.Y)
+			}
+		):Play()
+
+
+		TweenService:Create(
+			Frame,
+			TweenInfo.new(.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			{
+				Size = UDim2.fromOffset(frameWidth, Frame.AbsoluteSize.Y)
+			}
+		):Play()
+
+
+		TweenService:Create(
+			ExecutorUI,
+			TweenInfo.new(.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			{
+				Size = UDim2.fromOffset(containerWidth, ExecutorUI.AbsoluteSize.Y)
+			}
+		):Play()
+
+		window.pages.home.general.presence.Executor.Frame.TextLabel.Text =
+			executor]]
+
+		local layout = Bento.new(window.pages.home.general.Quick,{
+			Gap = 6,
+			RightPadding = 20,
+			TweenTime = 0.35
+		})
+
+		-- optional manual rows
+		local row1 = layout:NewRow()
+		local row2 = layout:NewRow()
+		local row3 = layout:NewRow()
+
+		layout:AddItem(window.pages.home.general.Quick.QuickPlay,nil,row1)
+		layout:AddItem(window.pages.home.general.Quick.Player,nil,row1)
+		layout:AddItem(window.pages.home.general.Quick.Latency,nil,row3)
+
+		layout:AddItem(
+			window.pages.home.general.Quick.QuickSettings,
+			{Bottom = true},
+			row2
+		)
+
+
+		layout:Bind()
+		layout:Update()
+
+		print("LATENCY SCRIPT RUNNING")
+
+		local Stats = game:GetService("Stats")
+		local TweenService = game:GetService("TweenService")
+
+		local graph = window.pages.home.general.Quick.Latency.Frame:WaitForChild("graph")
+
+		local pointTemplate = graph:WaitForChild("point")
+		local lineTemplate = graph:WaitForChild("line")
+
+		pointTemplate.Visible = false
+		lineTemplate.Visible = false
+
+		local UPDATE_INTERVAL = 0.3
+		local MAX_POINTS = 15
+		local MAX_PING = 300
+
+		local SMOOTH_SPEED = 0.25
+
+		local history = {}
+		local smoothHistory = {}
+
+		local points = {}
+		local lines = {}
+		local gridBuilt = false
+
+		repeat task.wait() until graph.AbsoluteSize.X > 0
+
+
+		local Players = game:GetService("Players")
+		local RunService = game:GetService("RunService")
+
+		local function getPing()
+
+			local ping =
+				Players.LocalPlayer:GetNetworkPing() * 1000
+
+			if ping == 0 and RunService:IsStudio() then
+
+				return 50 + math.noise(os.clock()*0.5)*40
+
+			end
+
+			return math.floor(ping)
+
+		end
+
+
+
+		local function clear()
+
+			for _,obj in ipairs(graph:GetChildren()) do
+
+				if obj ~= pointTemplate
+					and obj ~= lineTemplate then
+
+					obj:Destroy()
+
+				end
+
+			end
+
+		end
+
+
+		local function createGrid()
+
+			local w = graph.AbsoluteSize.X
+			local h = graph.AbsoluteSize.Y
+
+			local steps = 4
+
+			for i=0,steps do
+
+				local percent = i/steps
+				local y = h - (percent*h)
+
+				local gridLine = Instance.new("Frame")
+				gridLine.Size = UDim2.fromOffset(w,1)
+				gridLine.Position = UDim2.fromOffset(34,y)
+				gridLine.BackgroundTransparency = 0.85
+				gridLine.BorderSizePixel = 0
+				gridLine.Parent = graph
+
+
+				local label = Instance.new("TextLabel")
+				label.Size = UDim2.fromOffset(40,14)
+				label.Position = UDim2.fromOffset(2,y-7)
+
+				label.BackgroundTransparency = 1
+				label.TextSize = 6
+				label.TextXAlignment = Enum.TextXAlignment.Left
+				label.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+				label.Text =
+					math.floor(percent*MAX_PING)
+					.." ms"
+
+				label.TextTransparency = 0
+
+				label.Parent = graph
+
+			end
+
+		end
+
+
+
+		local function draw()
+
+			clear()
+			createGrid()
+
+			local w = graph.AbsoluteSize.X
+			local h = graph.AbsoluteSize.Y
+
+			local step = w/(MAX_POINTS-1)
+
+			local lastX,lastY
+
+			for i,value in ipairs(smoothHistory) do
+
+				local percent =
+					math.clamp(value/MAX_PING,0,1)
+
+				local x = (i-1)*step
+				local y = h - (percent*h)
+
+
+				local point = pointTemplate:Clone()
+				point.Visible = false
+				point.Position = UDim2.fromOffset(x,y)
+				point.AnchorPoint = Vector2.new(0.5,0.5)
+
+				point.Parent = graph
+
+
+				if lastX then
+
+					local dx = x-lastX
+					local dy = y-lastY
+
+					local length =
+						math.sqrt(dx*dx + dy*dy)
+
+					local angle =
+						math.deg(math.atan2(dy,dx))
+
+					local midX = (lastX + x)/2
+					local midY = (lastY + y)/2
+
+					local line = lineTemplate:Clone()
+
+					line.Visible = true
+					line.AnchorPoint = Vector2.new(0.5,0.5)
+
+					line.Position =
+						UDim2.fromOffset(midX,midY)
+
+					line.Size =
+						UDim2.fromOffset(length,1)
+
+					line.Rotation = angle
+
+					line.Parent = graph
+
+				end
+
+
+				lastX = x
+				lastY = y
+
+			end
+
+		end
+
+
+
+		task.spawn(function()
+			while true do
+
+				local ping = getPing()
+				-- replace with getPing() when ready
+				print(ping)
+
+				table.insert(history,ping)
+
+				if #history > MAX_POINTS then
+					table.remove(history,1)
+				end
+
+
+				-- smooth values
+				for i,v in ipairs(history) do
+
+					local current =
+						smoothHistory[i] or v
+
+					smoothHistory[i] =
+						current + (v-current)*SMOOTH_SPEED
+
+				end
+
+
+				draw()
+
+				task.wait(UPDATE_INTERVAL)
+
+			end
+		end)
+
+		local bh = window.pages.home.general.Quick.QuickSettings.QuickButtons.holder
+
+		for i,v in ipairs(window.pages.home.general.Quick.QuickSettings.QuickButtons.holder:GetChildren()) do
+			if v:IsA('Frame') then
+				v.MouseEnter:Connect(function()
+					tweenservice:Create(v.UIStroke, TweenInfo.new(0.4, Enum.EasingStyle.Exponential), {Transparency = 0}):Play()
+				end)
+
+				v.MouseLeave:Connect(function()
+					tweenservice:Create(v.UIStroke, TweenInfo.new(0.4, Enum.EasingStyle.Exponential), {Transparency = 1}):Play()
+				end)
+			end
+		end
+
+		bh.Leave.interact.MouseButton1Click:Connect(function()
+
+			game:GetService("Players").LocalPlayer:Kick("Left the experience")
+
+		end)
+
+		bh.Rejoin.interact.MouseButton1Click:Connect(function()
+
+			local TeleportService = game:GetService("TeleportService")
+			local player = game:GetService("Players").LocalPlayer
+
+			TeleportService:Teleport(game.PlaceId, player)
+
+		end)
+
+		local HttpService = game:GetService("HttpService")
+		local TeleportService = game:GetService("TeleportService")
+		local Players = game:GetService("Players")
+
+		local player = Players.LocalPlayer
+
+		local placeId = game.PlaceId
+
+		local function ServerHop()
+
+			local cursor = ""
+
+			local servers = {}
+
+			repeat
+
+				local url =
+					"https://games.roblox.com/v1/games/"
+					..placeId..
+					"/servers/Public?sortOrder=Asc&limit=100&cursor="
+					..cursor
+
+				local response =
+					HttpService:JSONDecode(
+						game:HttpGet(url)
+					)
+
+				for _,server in pairs(response.data) do
+
+					if server.playing < server.maxPlayers
+						and server.id ~= game.JobId then
+
+						table.insert(servers,server.id)
+
+					end
+
+				end
+
+				cursor = response.nextPageCursor
+
+			until cursor == nil or #servers > 0
+
+
+			if #servers > 0 then
+
+				TeleportService:TeleportToPlaceInstance(
+					placeId,
+					servers[math.random(1,#servers)],
+					player
+				)
+
+			end
+
+		end
+
+		bh.Fast.interact.MouseButton1Click:Connect(function()
+
+			ServerHop()
+
+		end)
+		
+		local Players = game:GetService("Players")
+
+		local label = window.pages.home.general.Quick.Player.Frame.TextLabel -- put script inside TextLabel
+
+		local function update()
+
+			local current =
+				#Players:GetPlayers()
+
+			local max =
+				Players.MaxPlayers
+
+			label.Text =
+				current.." / "..max
+
+		end
+
+
+		update()
+
+		Players.PlayerAdded:Connect(update)
+		Players.PlayerRemoving:Connect(update)
+		
+		local QuickPlay = window.pages.home.general.Quick.QuickPlay
+
+		local HttpService = game:GetService("HttpService")
+		local MarketplaceService = game:GetService("MarketplaceService")
+		local TeleportService = game:GetService("TeleportService")
+
+		local FILE = syde.ConfigFolder .. "/last_game.json"
+
+
+		-- save last played game
+		local function SaveLastGame(placeId)
+			if not syde.ConfigEnabled then return end
+
+			local data = {
+				PlaceId = placeId,
+				Time = os.time()
+			}
+
+			pcall(function()
+				writefile(FILE, HttpService:JSONEncode(data))
+			end)
+		end
+
+
+		-- load last played game
+		local function LoadLastGame()
+			if not syde.ConfigEnabled then return nil end
+			if not isfile(FILE) then return nil end
+
+			local success, result = pcall(function()
+				return HttpService:JSONDecode(readfile(FILE))
+			end)
+
+			if success then
+				return result
+			end
+		end
+
+
+
+		-- get placeId from file FIRST
+		local lastGame = LoadLastGame()
+
+		local placeId = game.PlaceId
+
+		if lastGame and lastGame.PlaceId then
+			placeId = lastGame.PlaceId
+		end
+
+
+		local success, info = pcall(function()
+			return MarketplaceService:GetProductInfoAsync(placeId, Enum.InfoType.Asset)
+		end)
+
+		if success and info then
+
+			QuickPlay.gtitle.Text = info.Name
+
+			local id=placeId -- your game id
+			local thumbnailUrl="https://www.roblox.com/asset-thumbnail/image?assetId="..id.."&width=768&height=432&format=png"
+			QuickPlay.thumb.Image=thumbnailUrl
+
+		else
+
+			warn("Failed to get game info for", placeId)
+
+		end
+
+
+
+
+		-- save current game after 2 minutes
+		task.delay(120, function()
+			if syde and syde.ConfigEnabled then
+				SaveLastGame(game.PlaceId)
+			end
+		end)
+
+
+		-- resume button
+		QuickPlay.Resume.interact.MouseButton1Click:Connect(function()
+
+			local lastGame = LoadLastGame()
+
+			if lastGame and lastGame.PlaceId then
+				TeleportService:Teleport(placeId)
+			end
+
+		end)
+
+	else
+		window.pages.home.Visible = false
+		window.tabs.Home.homeicon.interact.Interactable = false
+	end
 
 
 
@@ -3313,7 +4222,7 @@ function syde:Init(library)
 					colorpicker.color.BackgroundColor3 = data.Color
 					colorpicker.color.glow.ImageColor3 = data.Color
 
-				--	colorpicker.color.BackgroundColor3 = Color3.fromHSV(HSV[1], 1, 1)
+					--	colorpicker.color.BackgroundColor3 = Color3.fromHSV(HSV[1], 1, 1)
 					local newColor = Color3.fromHSV(HSV[1], HSV[2], HSV[3])
 					local newColor2 = Color3.fromHSV(HSV[1], 1, 1)
 
@@ -3979,7 +4888,7 @@ function syde:Init(library)
 				if data.SFlag then
 					syde.SettingsFlags[data.SFlag] = data
 				end
-				
+
 				if syde.ConfigEnabled and data.Flag and syde.Flags[data.Flag] then
 					local existing = syde.Flags[data.Flag]
 					if existing.Color then
@@ -4499,7 +5408,7 @@ function syde:Init(library)
 							if not success then
 								warn("[CALLBACK ERROR][" .. Slider.Name .. "]: " .. tostring(errorMsg))
 							end
-							
+
 							Options.StarterValue = newValue
 						end
 					end
@@ -4873,7 +5782,7 @@ function syde:Init(library)
 		local seq = syde.theme.DropShadow
 		local k = seq.Keypoints
 
-		a:ColorPicker({
+	--[[	a:ColorPicker({
 			Title = 'Dropshadow';
 			Linkable = true;
 			Type = 'Gradient';
@@ -4900,7 +5809,7 @@ function syde:Init(library)
 				})
 			end;
 			SFlag = 'DS'
-		})
+		})]]
 
 		local rotateGradient = false
 		local rotating = false
@@ -4998,7 +5907,7 @@ function syde:Init(library)
 						Transparency = 0.98;
 						BrickColor = BrickColor.new('Institutional white');
 					})
-					
+
 					local dof = Instance.new('DepthOfFieldEffect')
 					dof.Parent = game.Lighting
 					dof.Enabled = true
@@ -5116,6 +6025,145 @@ function syde:Init(library)
 			end,
 			SFlag = 'LS'
 		})
+
+
+		--// SERVICES
+		local HttpService = game:GetService("HttpService")
+
+		--// CONFIG
+		local isDev = false
+		local baseUrl = isDev and "http://localhost:3000" or "https://syde-auth.vercel.app"
+		local loginUrl = baseUrl .. "/api/login"
+		local VERIFY_ENDPOINT = baseUrl .. "/api/verify?id="
+
+		--// STATE
+		local currentDiscordId = nil
+		local lastCheck = 0
+		local debounceTime = 1.5 -- seconds
+
+		--// FUNCTION: open URL safely
+		local function openURL(url)
+			local success = false
+			pcall(function()
+				if syn and syn.openurl then
+					syn.openurl(url)
+					success = true
+				elseif getgenv().is_sirhurt_closure then
+					game:GetService("GuiService"):OpenBrowserWindow(url)
+					success = true
+				elseif KRNL_LOADED then
+					setclipboard(url)
+					success = true
+				end
+			end)
+
+			if not success and setclipboard then
+				setclipboard(url)
+				syde:Notify({
+					Title = "Link Copied",
+					Content = "OAuth link copied to clipboard. Paste in your browser.",
+					Duration = 5
+				})
+			end
+		end
+
+		--// BUTTON: Open OAuth
+		b:Button({
+			Title = "Connect Discord",
+			Description = "Authenticate your Discord account.",
+			CallBack = function()
+				openURL(loginUrl)
+			end,
+		})
+
+		local function verifyDiscord(id)
+			-- Try Roblox GetAsync first
+			if HttpService.HttpEnabled then
+				local ok, res = pcall(function()
+					return HttpService:GetAsync(VERIFY_ENDPOINT .. id, true)
+				end)
+				if ok and res then
+					local decodedOk, decoded = pcall(function()
+						return HttpService:JSONDecode(res)
+					end)
+					if decodedOk and type(decoded) == "table" and decoded.verified then
+						return true, decoded.discordUsername or nil
+					end
+				end
+				return false, nil
+			end
+
+			-- Fallback: executor HTTP
+			local success, result = pcall(function()
+				if syn and syn.request then
+					local r = syn.request({ Url = VERIFY_ENDPOINT .. id, Method = "GET" })
+					local decoded = HttpService:JSONDecode(r.Body)
+					if decoded.verified then
+						return decoded.discordUsername or nil
+					end
+				elseif request then
+					local r = request({ Url = VERIFY_ENDPOINT .. id, Method = "GET" })
+					local decoded = HttpService:JSONDecode(r.Body)
+					if decoded.verified then
+						return decoded.discordUsername or nil
+					end
+				end
+				return nil
+			end)
+
+			if success and result then
+				return true, result
+			end
+
+			return false, nil
+		end
+
+		--// INPUT: Discord ID verification
+		b:TextInput({
+			Title = "Discord ID",
+			PlaceHolder = "Paste your Discord ID after verifying",
+			ClearOnLost = false,
+			CallBack = function(v)
+				currentDiscordId = v
+
+				if not currentDiscordId or currentDiscordId == "" then
+					window.user.headshot.Status.BackgroundColor3 = Color3.fromRGB(255, 101, 104)
+					return
+				end
+
+				-- Debounce
+				if tick() - lastCheck < debounceTime then
+					return
+				end
+				lastCheck = tick()
+
+				-- Show checking
+				window.user.headshot.Status.BackgroundColor3 = Color3.fromRGB(255, 238, 49)
+
+				task.spawn(function()
+					local verified, discordUsername = verifyDiscord(currentDiscordId)
+					if verified then
+						window.user.headshot.Status.BackgroundColor3 = Color3.fromRGB(59, 255, 29)
+						if discordUsername then
+							window.user.headshot.id.username.Text = discordUsername
+						end
+						syde:Notify({
+							Title = "Success",
+							Content = "Discord verified successfully",
+							Duration = 4
+						})
+					else
+						window.user.headshot.Status.BackgroundColor3 = Color3.fromRGB(255, 101, 104)
+						syde:Notify({
+							Title = "Verification Failed",
+							Content = "Discord ID is not verified",
+							Duration = 4
+						})
+					end
+				end)
+			end,
+		})
+
 
 		function syde:SaveSettingsConfig()
 			local Data = {}
@@ -5273,7 +6321,7 @@ function syde:Init(library)
 	function tbdata:InitTab(tab)
 		-- bootstrap Home-mode once so first-created tabs don't auto-open
 
-	--[[	if Data.Home.Enabled then
+		if Data.Home.Enabled then
 			if not tbdata.__homeBootstrapped then
 				tbdata.__homeBootstrapped = true
 				tbdata.first = "Home"
@@ -5285,11 +6333,11 @@ function syde:Init(library)
 					end
 				end
 				-- ensure homepage is visible if present
-				if window and window.Pages and window.Pages.homepage then
-					window.Pages.homepage.Visible = true
+				if window and window.pages and window.pages.home then
+					window.pages.home.Visible = true
 				end
 			end
-		end]]
+		end
 
 
 		local isFirstTab = not tbdata.first 
@@ -5402,9 +6450,26 @@ function syde:Init(library)
 
 		local positionTweenInfo = TweenInfo.new(0.7, Enum.EasingStyle.Quart)
 		local colorTweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Exponential)
+		local HomeButton = (window and window.tabs and window.tabs.Home) and window.tabs.Home or nil
+		local HomePage = (window and window.pages and window.pages.home) and window.pages.home or nil
+
+		local function ApplyHomeButtonStyle(isActive)
+			if not HomeButton or not HomeButton.homeicon:FindFirstChild("ImageLabel") then
+				return
+			end
+
+			if isActive then
+				--	tweenservice:Create(HomeButton.text, TweenInfo.new(1, Enum.EasingStyle.Exponential), { TextTransparency = 0 }):Play()
+				tweenservice:Create(HomeButton.homeicon, TweenInfo.new(1, Enum.EasingStyle.Exponential), { BackgroundTransparency = 0.45 }):Play()
+				tweenservice:Create(HomeButton.homeicon.ImageLabel, TweenInfo.new(1, Enum.EasingStyle.Exponential), { ImageTransparency = 0 }):Play()
+			else
+				--	tweenservice:Create(HomeButton.text, TweenInfo.new(1, Enum.EasingStyle.Exponential), { TextTransparency = 0.67 }):Play()
+				tweenservice:Create(HomeButton.homeicon, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), { BackgroundTransparency = 0.85 }):Play()
+				tweenservice:Create(HomeButton.homeicon.ImageLabel, TweenInfo.new(1, Enum.EasingStyle.Exponential), { ImageTransparency = 0.67 }):Play()
+			end
+		end
 
 		local isInit = true
-
 
 		local function ApplyTabStyle(tabButton, isSelected)
 			local targetTextTransparency = isSelected and 0 or 0.6
@@ -5442,18 +6507,94 @@ function syde:Init(library)
 		end
 		ApplyTabStyle(Tab, isFirstTab)
 
+		if Data.Home.Enabled then
+			ApplyTabStyle(Tab, false)
+		else
+			ApplyTabStyle(Tab, isFirstTab)
+		end
 
+		local function ShowHome()
+			tbdata.homeActive = true
+			tbdata.first = "Home"
 
+			for _, otherPage in ipairs(pages:GetChildren()) do
+				if otherPage:IsA("ScrollingFrame") then
+					otherPage.Visible = false
+				end
+			end
+
+			for _, otherTab in ipairs(tabs:GetChildren()) do
+				if otherTab:IsA("Frame") then
+					ApplyTabStyle(otherTab, false)
+					otherTab.interact.Active = true
+				end
+			end
+
+			if HomePage then
+				HomePage.Visible = true
+				pcall(function() tweenservice:Create(HomePage, TweenInfo.new(0.45, Enum.EasingStyle.Quint), { BackgroundTransparency = 1 }):Play() end)
+			end
+
+			ApplyHomeButtonStyle(true)
+			window.pages.clipframe.Visible = false
+			--	window.pages.v0.Visible = false
+			--	window.pages.v1.Visible = false
+		end
+
+		local function HideHomeForTab()
+			tbdata.homeActive = false
+
+			if HomePage and HomePage.Visible then
+				-- hide immediately to prevent overlap flicker
+				HomePage.Visible = false  
+
+				-- optional: still tween background transparency for smoothness
+				pcall(function() 
+					HomePage.BackgroundTransparency = 1 
+				end)
+			end
+
+			ApplyHomeButtonStyle(false)
+			window.pages.clipframe.Visible = true
+			--	window.pages.v0.Visible = true
+			--	window.pages.v1.Visible = true
+		end
+
+		if tbdata.first == 'Home' then
+			ShowHome()
+		end
+
+		-- Hook Home button click once (if present)
+		if HomeButton and HomeButton.homeicon:FindFirstChild("interact") and not tbdata.__homeHooked then
+			tbdata.__homeHooked = true
+			HomeButton.homeicon.interact.MouseButton1Click:Connect(function()
+				if tbdata.homeActive then return end 
+
+				-- Force-hide all locked pages
+				local lockedFolder = pages:FindFirstChild("lockedpages")
+				if lockedFolder then
+					for _, lockedPage in ipairs(lockedFolder:GetChildren()) do
+						if lockedPage:IsA("TextButton") then
+							lockedPage.Visible = false
+						end
+					end
+				end
+
+				ShowHome()
+			end)
+
+		end
 
 		Tab.interact.MouseButton1Click:Connect(function()
 			if tbdata.first == tdata.Title then return end 
 
 			-- Hide Home if active
-		--[[	if Data.Home.Enabled then
-				if ldata.homeActive then
+			if Data.Home.Enabled then
+				if tbdata.homeActive then
 					HideHomeForTab()
 				end
-			end]]
+			end
+
 
 			local previous = tbdata.first
 			tbdata.first = tdata.Title
@@ -6236,7 +7377,7 @@ function syde:Init(library)
 					SaveConfig()
 				end
 			end
-			
+
 			-- If config already loaded before element creation
 			if syde.ConfigEnabled and data.Flag and syde.Flags[data.Flag] and syde.Flags[data.Flag].V ~= nil then
 				data:Set(syde.Flags[data.Flag].V, true)
@@ -6247,7 +7388,7 @@ function syde:Init(library)
 					syde.Flags[data.Flag] = data
 				end
 			end
-			
+
 			return data
 		end
 
@@ -6439,11 +7580,11 @@ function syde:Init(library)
 						if not success then
 							warn("[CALLBACK ERROR][" .. Slider.Name .. "]: " .. tostring(errorMsg))
 						end
-						
+
 
 						Options:Set(newValue)
 						SaveConfig()
-						
+
 					end
 				end
 				UpdateSlider()
@@ -6531,7 +7672,7 @@ function syde:Init(library)
 						syde.Flags[Options.Flag] = Options
 					end
 				end
-				
+
 			end
 
 			--[DESC]
@@ -7140,7 +8281,7 @@ function syde:Init(library)
 
 
 		end
-		
+
 		function initelement:Section(Title, Icon)
 			local SectionData = {
 				Title = Title
@@ -7497,7 +8638,7 @@ function syde:Init(library)
 			}
 
 			ColorPicker.Linkable = ColorPicker.Linkable or true
-			
+
 
 			local colorpicker = pages.page.ColorPicker:Clone()
 			colorpicker.Visible = true
@@ -7720,8 +8861,8 @@ function syde:Init(library)
 				data.Color = TableToColor(HSV)
 				colorpicker.color.glow.ImageColor3 = data.Color
 				colorpicker.color.BackgroundColor3 = data.Color
-				
-			 --	colorpicker.color.BackgroundColor3 = Color3.fromHSV(HSV[1], 1, 1)
+
+				--	colorpicker.color.BackgroundColor3 = Color3.fromHSV(HSV[1], 1, 1)
 				local newColor = Color3.fromHSV(HSV[1], HSV[2], HSV[3])
 				local newColor2 = Color3.fromHSV(HSV[1], 1, 1)
 
@@ -7746,7 +8887,7 @@ function syde:Init(library)
 
 
 				HueSat.Value = data.Color
-				
+
 
 				tweenservice:Create(HUESlider.Pin, TweenInfo.new(0.1, Enum.EasingStyle.Exponential), {BackgroundColor3 = newColor2}):Play()
 				tweenservice:Create(SVPicker.Pin, TweenInfo.new(0.1, Enum.EasingStyle.Exponential), {BackgroundColor3 = newColor}):Play()
@@ -7769,7 +8910,7 @@ function syde:Init(library)
 				if data.CallBack then
 					data.CallBack(data.Color)
 				end
-				
+
 				data.Color = data.Color
 			end
 			updatestuff()
@@ -8406,14 +9547,14 @@ function syde:Init(library)
 					SaveConfig()
 				end
 			end
-			
+
 			if syde.ConfigEnabled then
 				if data.Flag then
 					syde.Flags[data.Flag] = data
 				end
 			end
-			
-		
+
+
 
 			return data
 
