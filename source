@@ -16,7 +16,7 @@ local players =         game:GetService("Players"):GetPlayers()
 local textservice =     game:GetService('TextService')
 local player =          game:GetService('Players')
 local textservice =     game:GetService('TextService')
-local coregui =         game:GetService("CoreGui")
+local coregui =         (gethui and gethui()) or game:GetService("CoreGui")
 
 -- update check
 local update = false
@@ -127,6 +127,7 @@ local syde = {
 	ConfigFile = 'Config';
 	Flags = {};
 	SettingsFlags = {};
+	LoadedConfig = nil;
 }
 
 -- @Utilities
@@ -173,6 +174,199 @@ function syde:UpdateTheme(Config)
 			self.Comms:Fire(key, self.theme[key])
 		end
 	end
+end
+
+-- @ControllerSupport / numeric helpers
+
+-- True if an input can be used as a bind (keyboard key OR controller button)
+function syde:IsBindableInput(input)
+	local t = input.UserInputType
+	if t == Enum.UserInputType.Keyboard then
+		return true
+	end
+	if string.find(tostring(t), "Gamepad", 1, true) then
+		return input.KeyCode ~= Enum.KeyCode.Unknown
+	end
+	return false
+end
+
+-- Number of decimal places a number has (handles 0.01, 0.05, etc. correctly)
+function syde:DecimalPlaces(num)
+	local str = string.format("%.10f", tonumber(num) or 0)
+	str = str:gsub("0+$", "")
+	str = str:gsub("%.$", "")
+	local dot = string.find(str, "%.", 1, true)
+	if not dot then
+		return 0
+	end
+	return #str - dot
+end
+
+-- Round a number to a fixed number of decimal places (removes float drift)
+function syde:RoundTo(num, decimals)
+	local mult = 10 ^ (decimals or 0)
+	return math.floor(num * mult + 0.5) / mult
+end
+
+-- Copy text to the clipboard across common executor globals. Returns true on success.
+function syde:SetClipboard(text)
+	local fn = setclipboard or toclipboard or set_clipboard or writeclipboard or (syn and syn.write_clipboard)
+	if fn then
+		return (pcall(fn, text))
+	end
+	return false
+end
+
+-- Connect a click handler whether the target is a GuiButton, has an "interact" child, or is a plain label.
+function syde:OnClick(object, callback)
+	if not object then return end
+	local target = object:FindFirstChild("interact") or object:FindFirstChild("Interact") or object
+	if target:IsA("GuiButton") then
+		target.MouseButton1Click:Connect(callback)
+	else
+		target.Active = true
+		target.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				callback()
+			end
+		end)
+	end
+end
+
+-- Brief green flash on a copy icon to confirm the copy worked.
+function syde:FlashCopy(icon)
+	if not icon then return end
+	tweenservice:Create(icon, TweenInfo.new(0.12, Enum.EasingStyle.Quint), { ImageColor3 = Color3.fromRGB(120, 220, 120) }):Play()
+	task.delay(0.4, function()
+		tweenservice:Create(icon, TweenInfo.new(0.3, Enum.EasingStyle.Quint), { ImageColor3 = Color3.fromRGB(255, 255, 255) }):Play()
+	end)
+end
+
+-- Branded error reporter: prints a "screenshot this" banner, the error, and a likely fix.
+function syde:Report(context, err)
+	local message = tostring(err or "unknown error")
+	local low = string.lower(message)
+
+	local fix
+	if string.find(low, "httpget", 1, true) or string.find(low, "getobjects", 1, true)
+		or string.find(low, "failed to load library", 1, true) or string.find(low, "rbxassetid", 1, true) then
+		fix = "The UI asset/source failed to download. Re-run it; if it keeps happening your executor is blocking HttpGet/asset loading, or GitHub is serving an old/partial copy (wait ~30s)."
+	elseif string.find(low, "not a valid member", 1, true) or string.find(low, "attempt to index nil", 1, true)
+		or string.find(low, "index a nil", 1, true) then
+		fix = "A UI element is missing - your Source and the UI asset id are out of sync. Re-copy the newest Source and re-grab the UI asset."
+	elseif string.find(low, "attempt to call a nil value", 1, true) then
+		fix = "A required function is missing - usually an executor that lacks a global like gethui/getgenv/setclipboard. Try an updated/different executor."
+	elseif string.find(low, "callback", 1, true) then
+		fix = "This came from a callback (your own function), not Syde itself. Check the function attached to that element."
+	else
+		fix = "Unexpected error - send the screenshot above so it can be looked into."
+	end
+
+	warn(table.concat({
+		"",
+		"----------screenshot this and send it to king jericoo------",
+		"[ Syde ] " .. tostring(context or "Error"),
+		"Problem: " .. message,
+		"Fix: " .. fix,
+		"------------------------------------------------------------",
+		"",
+	}, "\n"))
+end
+
+-- Wrap a function so any error it throws is reported via the banner (and swallowed).
+function syde:Guard(context, fn)
+	return function(...)
+		local res = table.pack(pcall(fn, ...))
+		if not res[1] then
+			syde:Report(context, res[2])
+			return nil
+		end
+		return table.unpack(res, 2, res.n)
+	end
+end
+
+-- Make a slider's value label clickable so the user can type an exact number.
+-- Out-of-range or invalid input reverts to the previous value.
+function syde:AttachSliderInput(Slider, Options)
+	local valueLabel = Slider:FindFirstChild("v")
+	if not valueLabel or valueLabel:FindFirstChild("ValueInput") then
+		return
+	end
+
+	-- formatted "/max" suffix that stays visible while typing
+	local function maxString()
+		local dp = syde:DecimalPlaces(Options.Increment)
+		return string.format("%." .. dp .. "f", tonumber(Options.Range[2]) or 0)
+	end
+
+	-- render the label as "<valueText>/<max>" (valueText shown verbatim)
+	local function renderValue(valueText)
+		valueLabel.Text = string.format("<font size='14'>%s</font><font color='#434343'>/%s</font>", valueText, maxString())
+	end
+
+	-- re-render the label with the slider's current value
+	local function renderCurrent()
+		local dp = syde:DecimalPlaces(Options.Increment)
+		renderValue(string.format("%." .. dp .. "f", tonumber(Options.StarterValue) or 0))
+	end
+
+	local editing = false
+
+	local editBox = Instance.new("TextBox")
+	editBox.Name = "ValueInput"
+	editBox.BackgroundTransparency = 1
+	editBox.Text = ""
+	editBox.PlaceholderText = ""
+	editBox.TextEditable = true
+	editBox.ClearTextOnFocus = false
+	editBox.RichText = false
+	editBox.MultiLine = false
+	editBox.Active = true
+	editBox.Selectable = true
+	editBox.TextTransparency = 1   -- invisible; live feedback is shown on the label itself
+	editBox.TextSize = 14
+	editBox.Size = UDim2.fromScale(1, 1)
+	editBox.Position = UDim2.fromScale(0, 0)
+	editBox.ZIndex = valueLabel.ZIndex + 5
+	editBox.Parent = valueLabel
+
+	editBox.Focused:Connect(function()
+		editing = true
+		editBox.Text = ""      -- box starts empty on click
+		renderValue("")        -- value cleared, the "/max" suffix stays visible
+	end)
+
+	editBox:GetPropertyChangedSignal("Text"):Connect(function()
+		if not editing then return end
+		renderValue(editBox.Text)   -- live-update the label as the user types
+	end)
+
+	editBox.FocusLost:Connect(function()
+		editing = false
+		local raw = editBox.Text
+		editBox.Text = ""
+
+		local typed = tonumber(raw)
+		local low = math.min(Options.Range[1], Options.Range[2])
+		local high = math.max(Options.Range[1], Options.Range[2])
+
+		if raw ~= "" and typed and typed >= low and typed <= high and Options.Set then
+			local inc = Options.Increment or 1
+			if inc > 0 then
+				-- snap to the slider's increment and round away float drift
+				typed = math.floor((typed - low) / inc + 0.5) * inc + low
+				typed = syde:RoundTo(typed, syde:DecimalPlaces(inc))
+				typed = math.clamp(typed, low, high)
+			end
+			Options:Set(typed)
+		else
+			-- typed nothing / invalid / out of range -> revert to the previous value
+			renderCurrent()
+		end
+	end)
+
+	return editBox
 end
 
 -- fractality
@@ -1167,7 +1361,8 @@ function syde:AddDrag(Object, Main, ConstrainToParent)
 		end
 	end)
 
-	syde:AddConnection(Object.InputEnded, function(input)
+	-- listen globally so a fast drag that leaves the handle still releases
+	syde:AddConnection(userInput.InputEnded, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
@@ -1212,8 +1407,7 @@ local mh = true
 do
 
 	function syde:Load(Config)
-		task.wait(1)
-		print('[SYED] Loader Loaded')
+		task.wait(0.4)
 		local LOADER = Loader
 		LOADER.Enabled = true
 		LOADER.Parent = coregui
@@ -1384,7 +1578,6 @@ do
 					task.wait(0.5)
 					tweenservice:Create(clone.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Color = Styles[platform].BackGroundColor}):Play()
 					tweenservice:Create(clone.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Transparency = 0.5}):Play()
-					print(value)
 				else
 					tweenservice:Create(clone.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Color = Color3.fromRGB(255, 41, 45)}):Play()
 					tweenservice:Create(clone.Frame.UIStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quart), {Transparency = 0}):Play()
@@ -1410,7 +1603,7 @@ do
 		--	tweenservice:Create(logo, TweenInfo.new(1, Enum.EasingStyle.Quint), {Position = UDim2.new(0.5, 0,0, 105)}):Play()
 
 		tweenservice:Create(logo.Title, TweenInfo.new(2, Enum.EasingStyle.Exponential), {TextTransparency = 0}):Play()
-		task.wait(1)
+		task.wait(0.4)
 
 
 		--	local function initLoader()
@@ -1430,25 +1623,23 @@ do
 			tweenservice:Create(LOADER.loader.work, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), { TextTransparency = 1 }):Play()
 			tweenservice:Create( LOADER.loader.work.ImageLabel, TweenInfo.new(0.5, Enum.EasingStyle.Exponential), { ImageTransparency = 1 }):Play()
 			tweenservice:Create( LOADER.loader.work, TweenInfo.new(0.5, Enum.EasingStyle.Quint), { Position = UDim2.new(0.5, 0,1, -100) }):Play()
-			task.wait(0.6)
+			task.wait(0.35)
 
 			-- reset
 
 		end
 
 		local function load()
-			TweenWorkLabel(1,'rbxassetid://136002400178503', '')
+			TweenWorkLabel(0.4,'rbxassetid://136002400178503', '')
 
 			if Config.ConfigurationSaving and Config.ConfigurationSaving.Enabled then
 				local folderName = Config.ConfigurationSaving.FolderName or "SydeSec"
 				local fileName = Config.ConfigurationSaving.FileName or "default_config"
-				local fullPath = folderName .. "/" .. fileName .. ".lua"
 
 				syde.ConfigEnabled = true
-				syde.ConfigFolder = folderName  
-				syde.ConfigFile = fileName     
+				syde.ConfigFolder = folderName
+				syde.ConfigFile = fileName
 
-				-- Ensure folder exists
 				if isfolder and not isfolder(folderName) then
 					local success, err = pcall(function()
 						makefolder(folderName)
@@ -1458,22 +1649,32 @@ do
 					end
 				end
 
-				-- File validation
-				local success, err = pcall(function()
-					if isfile and not isfile(fullPath) then
-						writefile(fullPath, "-- Protected UI Configuration")
-					else
-						local content = readfile(fullPath)
+				-- Only preload the saved config if AutoLoad was explicitly enabled
+				local autoloadPath = string.format("%s/_autoload.txt", folderName)
+				local autoload = false
+				if isfile and isfile(autoloadPath) then
+					local ok, content = pcall(readfile, autoloadPath)
+					if ok and content then
+						autoload = tostring(content):match("^%s*(.-)%s*$") == "1"
 					end
-				end)
+				end
 
-				if not success then
-					warn("[SYDE] File write/read blocked or failed:", err)
+				if autoload then
+					local configPath = string.format("%s/%s.json", folderName, fileName)
+					if isfile and isfile(configPath) then
+						local ok, content = pcall(readfile, configPath)
+						if ok and content then
+							local decodeOk, decoded = pcall(function() return https:JSONDecode(content) end)
+							if decodeOk and type(decoded) == "table" then
+								syde.LoadedConfig = decoded
+							end
+						end
+					end
 				end
 			end
 
 
-			TweenWorkLabel(1,'rbxassetid://105810189969774', '')
+			TweenWorkLabel(0.4,'rbxassetid://105810189969774', '')
 
 			local UI_TAG = "sydeUILoader"
 			local MARKER_NAME = "SYDEUIDetector"
@@ -1500,7 +1701,7 @@ do
 			end)
 
 			if not successLibrary or not Library then
-				warn("[SYDE] Failed to load Library.")
+				syde:Report("Loading UI library", "Library/GetObjects returned nil - the UI asset failed to load")
 				return
 			end
 
@@ -1529,7 +1730,7 @@ do
 				end
 			end)
 
-			TweenWorkLabel(1,'rbxassetid://108012241529487', '')
+			TweenWorkLabel(0.4,'rbxassetid://108012241529487', '')
 
 
 			if Config.AutoJoinDiscord and Config.AutoJoinDiscord.Enabled then
@@ -1539,15 +1740,12 @@ do
 				local inviteCode = discordConfig.Invite
 				local inviteFilePath = discordFolder .. "/" .. inviteCode .. ".txt"
 
-				warn("[SYDE] Discord AutoJoin enabled. Preparing to send invite:", inviteCode)
-
 				-- Ensure folder exists
 				if isfolder and not isfolder(discordFolder) then
 					local folderSuccess, folderErr = pcall(function()
 						makefolder(discordFolder)
 					end)
 					if folderSuccess then
-						print("[SYDE] Created DiscordInvites folder at:", discordFolder)
 					else
 						warn("[SYDE] Failed to create DiscordInvites folder:", folderErr)
 					end
@@ -1555,7 +1753,6 @@ do
 
 				local shouldPrompt = true
 				if isfile and discordConfig.RememberJoins and isfile(inviteFilePath) then
-					print("[SYDE] Discord invite '" .. inviteCode .. "' already joined. Skipping prompt.")
 					shouldPrompt = false
 				end
 
@@ -1580,7 +1777,6 @@ do
 						end)
 
 						if reqSuccess then
-							print("[SYDE] Discord invite sent successfully to:", inviteCode)
 						else
 							warn("[SYDE] Failed to send Discord invite:", reqErr)
 						end
@@ -1594,7 +1790,6 @@ do
 						end)
 
 						if writeSuccess then
-							print("[SYDE] Logged Discord invite join for:", inviteCode)
 						else
 							warn("[SYDE] Failed to write join log for invite:", writeErr)
 						end
@@ -1602,8 +1797,8 @@ do
 				end
 			end
 
-			TweenWorkLabel(1,'rbxassetid://136405833725573', '')
-			task.wait(1)
+			TweenWorkLabel(0.4,'rbxassetid://136405833725573', '')
+			task.wait(0.4)
 			loaded = true
 			--	tweenservice:Create( LOADER.load.Salt, TweenInfo.new(0.65, Enum.EasingStyle.Quint), {Size = UDim2.new(0, 146,0, 25)}):Play()
 			--	tweenservice:Create( LOADER.load.Salt.ImageLabel, TweenInfo.new(0.65, Enum.EasingStyle.Exponential), {ImageTransparency = 0}):Play()
@@ -1613,7 +1808,7 @@ do
 		task.wait(0.08)
 		load()
 
-		task.wait(2)
+		task.wait(0.6)
 
 		--	Library.Enabled = true
 		syde.theme.Accent = Config.Accent;
@@ -1645,7 +1840,7 @@ local function ApplyFlag(Flag, Value)
 		local unpacked = syde:ColorUnpack(Value)
 
 		if Flag.Set then
-			Flag:Set(unpacked)
+			Flag:Set(unpacked, true)
 		elseif Flag.Color then
 			Flag.Color = unpacked
 		end
@@ -1655,7 +1850,7 @@ local function ApplyFlag(Flag, Value)
 
 	-- Standard Setter
 	if Flag.Set then
-		Flag:Set(Value)
+		Flag:Set(Value, true)
 		return true
 	end
 
@@ -1677,36 +1872,52 @@ end
 function LoadConfig(Configuration)
 	if type(Configuration) ~= "string" then
 		warn("Syde 〡 Invalid config format.")
-		return false
+		return false, 0
 	end
 
 	local Decoded = SafeDecode(Configuration)
 	if not Decoded then
 		warn("Syde 〡 Failed to decode config.")
-		return false
+		return false, 0
 	end
+
+	-- Cache so flags registered later can still apply their saved values
+	syde.LoadedConfig = Decoded
 
 	-- Version check (future ready)
 	if Decoded._version and Decoded._version ~= CONFIG_VERSION then
 		warn("Syde 〡 Config version mismatch.")
 	end
 
-	local changed = false
+	local applied = 0
 
+	-- Suppress per-element notifications fired by callbacks during the bulk apply
+	syde.SuppressNotify = true
 	for FlagName, Flag in pairs(syde.Flags) do
 		local SavedValue = Decoded[FlagName]
 
 		if SavedValue ~= nil then
-			local success = ApplyFlag(Flag, SavedValue)
-			if success then
-				changed = true
+			-- Isolate each flag so a single bad one doesn't break the whole load
+			local ok, success = pcall(ApplyFlag, Flag, SavedValue)
+			if ok and success then
+				applied = applied + 1
+			elseif not ok then
+				warn("Syde 〡 Failed to apply flag '" .. tostring(FlagName) .. "':", success)
 			end
 		end
-
-		print("Loading Flag:", FlagName, "Value:", SavedValue)
 	end
+	syde.SuppressNotify = false
 
-	return changed
+	return true, applied
+end
+
+-- Apply a cached saved value to a flag, if one exists
+function syde:ApplyCachedFlag(Flag)
+	if not Flag or not Flag.Flag then return end
+	if not self.LoadedConfig then return end
+	local saved = self.LoadedConfig[Flag.Flag]
+	if saved == nil then return end
+	ApplyFlag(Flag, saved)
 end
 
 -- Internal Save Logic
@@ -1720,13 +1931,15 @@ local function PerformSave()
 
 	for FlagName, Flag in pairs(syde.Flags) do
 		if Flag.Type == "ColorPicker" then
+			if Flag.Color then
+				Data[FlagName] = syde:ColorPack(Flag.Color)
+			end
+		elseif Flag.V ~= nil then
+			Data[FlagName] = Flag.V
+		elseif Flag.Color then
 			Data[FlagName] = syde:ColorPack(Flag.Color)
-		else
-			Data[FlagName] =
-				Flag.V ~= nil and Flag.V
-				or Flag.Color
-				or Flag.StarterValue
-				or false
+		elseif Flag.StarterValue ~= nil then
+			Data[FlagName] = Flag.StarterValue
 		end
 	end
 
@@ -1753,6 +1966,148 @@ function SaveConfig()
 	end
 
 	SaveDebounce = task.delay(SAVE_DELAY, PerformSave)
+end
+
+function syde:LoadSaveConfig(targetFile)
+	if not syde.ConfigEnabled then
+		if syde.Toast then syde:Toast({ Content = 'Configs disabled in syde:Load', Duration = 3 }) end
+		return false
+	end
+
+	local fileName = targetFile or syde.ConfigFile
+	local filePath = string.format("%s/%s.json", syde.ConfigFolder, fileName)
+
+	if not isfile or not isfile(filePath) then
+		if syde.Toast then
+			syde:Toast({ Content = 'No save file found at ' .. filePath, Duration = 3 })
+		end
+		return false
+	end
+
+	local ok, decoded, applied = pcall(function()
+		return LoadConfig(readfile(filePath))
+	end)
+
+	if ok and decoded then
+		if targetFile then
+			syde.ConfigFile = targetFile
+		end
+		if syde.Toast then
+			syde:Toast({ Content = 'loaded your sorry ass config', Duration = 3 })
+		end
+		return true
+	end
+
+	warn("[SYDE] Configurations Error " .. tostring(decoded))
+	if syde.Toast then
+		syde:Toast({ Content = 'Failed to load config', Duration = 3 })
+	end
+	return false
+end
+
+function syde:ListConfigs()
+	local list = {}
+	if not syde.ConfigEnabled then return list end
+	if not listfiles or not isfolder or not isfolder(syde.ConfigFolder) then return list end
+
+	local ok, files = pcall(listfiles, syde.ConfigFolder)
+	if not ok or type(files) ~= "table" then return list end
+
+	for _, full in ipairs(files) do
+		local name = tostring(full):match("([^/\\]+)%.json$")
+		if name and name ~= "SettingsConfig" then
+			table.insert(list, name)
+		end
+	end
+	table.sort(list)
+	return list
+end
+
+function syde:SaveConfigAs(name)
+	if not syde.ConfigEnabled then
+		if syde.Toast then syde:Toast({ Content = 'Configs disabled in syde:Load', Duration = 3 }) end
+		return false
+	end
+	if type(name) ~= "string" or name == "" then return false end
+	if not writefile then
+		if syde.Toast then syde:Toast({ Content = 'Executor has no writefile', Duration = 3 }) end
+		return false
+	end
+
+	local Data = { _version = CONFIG_VERSION }
+	local count = 0
+	for FlagName, Flag in pairs(syde.Flags) do
+		if Flag.Type == "ColorPicker" then
+			if Flag.Color then
+				Data[FlagName] = syde:ColorPack(Flag.Color)
+				count = count + 1
+			end
+		elseif Flag.V ~= nil then
+			Data[FlagName] = Flag.V
+			count = count + 1
+		elseif Flag.Color then
+			Data[FlagName] = syde:ColorPack(Flag.Color)
+			count = count + 1
+		elseif Flag.StarterValue ~= nil then
+			Data[FlagName] = Flag.StarterValue
+			count = count + 1
+		end
+	end
+
+	if makefolder and isfolder and not isfolder(syde.ConfigFolder) then
+		makefolder(syde.ConfigFolder)
+	end
+
+	local ok, err = pcall(function()
+		writefile(string.format("%s/%s.json", syde.ConfigFolder, name), HttpService:JSONEncode(Data))
+	end)
+
+	if ok then
+		syde.ConfigFile = name
+		if syde.Toast then
+			syde:Toast({ Content = 'saved your sorry ass config', Duration = 3 })
+		end
+		return true
+	else
+		warn("[SYDE] Save failed:", err)
+		if syde.Toast then
+			syde:Toast({ Content = 'Save failed: ' .. tostring(err), Duration = 3 })
+		end
+	end
+	return false
+end
+
+function syde:DeleteConfig(name)
+	if not syde.ConfigEnabled then return false end
+	if type(name) ~= "string" or name == "" then return false end
+	local filePath = string.format("%s/%s.json", syde.ConfigFolder, name)
+	if isfile and isfile(filePath) and delfile then
+		return pcall(delfile, filePath)
+	end
+	return false
+end
+
+local function autoloadFilePath()
+	return string.format("%s/_autoload.txt", syde.ConfigFolder)
+end
+
+function syde:GetAutoLoad()
+	-- Default OFF unless the user explicitly enables it
+	if not syde.ConfigEnabled or not isfile then return false end
+	local path = autoloadFilePath()
+	if not isfile(path) then return false end
+	local ok, content = pcall(readfile, path)
+	if not ok or not content then return false end
+	return tostring(content):match("^%s*(.-)%s*$") == "1"
+end
+
+function syde:SetAutoLoad(enabled)
+	if not syde.ConfigEnabled or not writefile then return false end
+	if makefolder and isfolder and not isfolder(syde.ConfigFolder) then
+		makefolder(syde.ConfigFolder)
+	end
+	local ok = pcall(writefile, autoloadFilePath(), enabled and "1" or "0")
+	return ok
 end
 
 
@@ -1818,6 +2173,7 @@ for _, temp in ipairs(Library.Notification:GetChildren()) do
 end 
 
 function syde:Notify(Notification)
+	if syde.SuppressNotify then return end
 	task.spawn(function()
 
 		local NotifData = {
@@ -1839,7 +2195,6 @@ function syde:Notify(Notification)
 		Notification.Content.Text = NotifData.Content
 		Notification.Content.Size = UDim2.new(0, 200,0, Notification.Content.TextBounds.Y )
 		Notification.icon.Image = 'rbxassetid://'..NotifData.Icon
-		print(NotifData.Icon)
 		Notification.icon.Visible = true
 
 
@@ -1988,7 +2343,6 @@ function syde:Modal(Modal)
 
 		local function closeModal()
 			activeModals -= 1
-			print(activeModals)
 			ModalInstance.Buttons.Cancel.Interactable = false
 			ModalInstance.Buttons.Confirm.Interactable = false
 			tweenservice:Create(ModalInstance, TweenInfo.new(0.75, Enum.EasingStyle.Quint), {Size = UDim2.new(0, 350,0, 147)}):Play()
@@ -2156,7 +2510,6 @@ end
 
 --@SetupFunctionst
 function SetUserInfo()
-	print('set')
 	local LocalPlayer = player.LocalPlayer
 
 	local PLACEHOLDER_IMAGE = "rbxassetid://0" 
@@ -2360,7 +2713,6 @@ function ToggleUI()
 
 	if uiclosed then
 		--	task.wait(0.2)
-		print('open')
 		openui()
 
 		workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
@@ -2375,7 +2727,6 @@ function ToggleUI()
 		userinput:GetPropertyChangedSignal("TouchEnabled"):Connect(updateLayout)
 	else
 		closeui()
-		print('close')
 	end
 
 	task.delay(0.2, function()
@@ -2431,7 +2782,7 @@ function syde:Init(library)
 		end)
 
 		if not successLibrary or not Library then
-			warn("[SYDE] Failed to load Library.")
+			syde:Report("Loading UI library", "Library/GetObjects returned nil - the UI asset failed to load")
 			return
 		end
 
@@ -2487,6 +2838,13 @@ function syde:Init(library)
 
 	if mh then
 		rs = RunService.RenderStepped:Connect(function()
+			-- stop cleanly if the watermark/minihome was hidden or destroyed
+			local info = Minihome and Minihome:FindFirstChild("info")
+			if not info then
+				if rs then rs:Disconnect() end
+				return
+			end
+
 			-- FPS
 			frames += 1
 			local now = tick()
@@ -2496,12 +2854,12 @@ function syde:Init(library)
 				lastTime = now
 				frames = 0
 
-				Minihome.info.fps.Text = fps .. " FPS"
+				info.fps.Text = fps .. " FPS"
 			end
 
 			-- Time → 8:45
 			local hour = tonumber(os.date("%I"))
-			Minihome.info.time.Text = hour .. os.date(":%M")
+			info.time.Text = hour .. os.date(":%M")
 		end)
 
 
@@ -2524,6 +2882,9 @@ function syde:Init(library)
 
 	--dragging
 	syde:AddDrag(top, window, true)
+	if Minihome then
+		syde:AddDrag(Minihome, Minihome) -- make the watermark draggable
+	end
 	syde:MakeResizable(window.resize, window, Vector2.new(454, 228))
 
 	--initial transparency setup
@@ -2841,7 +3202,6 @@ function syde:Init(library)
 		layout:Bind()
 		layout:Update()
 
-		print("LATENCY SCRIPT RUNNING")
 
 		local Stats = game:GetService("Stats")
 		local TweenService = game:GetService("TweenService")
@@ -3024,7 +3384,6 @@ function syde:Init(library)
 
 				local ping = getPing()
 				-- replace with getPing() when ready
-				print(ping)
 
 				table.insert(history,ping)
 
@@ -3089,6 +3448,23 @@ function syde:Init(library)
 
 		local placeId = game.PlaceId
 
+		-- Cross-executor HTTP GET. game:HttpGet is not present in every
+		-- executor environment (the "HttpGet is not a valid member of
+		-- DataModel" error), so prefer the executor request functions and
+		-- only fall back to game:HttpGet when nothing else is available.
+		local httpRequest = (syn and syn.request)
+			or (http and http.request)
+			or http_request
+			or request
+
+		local function httpGet(url)
+			if httpRequest then
+				local response = httpRequest({ Url = url, Method = "GET" })
+				return response and response.Body
+			end
+			return game:HttpGet(url)
+		end
+
 		local function ServerHop()
 
 			local cursor = ""
@@ -3103,10 +3479,13 @@ function syde:Init(library)
 					"/servers/Public?sortOrder=Asc&limit=100&cursor="
 					..cursor
 
-				local response =
-					HttpService:JSONDecode(
-						game:HttpGet(url)
-					)
+				local ok, response = pcall(function()
+					return HttpService:JSONDecode(httpGet(url))
+				end)
+
+				if not ok or type(response) ~= "table" or not response.data then
+					break
+				end
 
 				for _,server in pairs(response.data) do
 
@@ -3461,7 +3840,7 @@ function syde:Init(library)
 						if data.CallBack then
 							local success, errorMsg = pcall(c)
 							if not success then
-								warn(`[ Button Error: { button.Name } ] Callback Error: { errorMsg }`)
+								syde:Report("Button '" .. button.Name .. "' callback", errorMsg)
 
 							end
 						else
@@ -3535,7 +3914,7 @@ function syde:Init(library)
 							if data.CallBack then
 								local success, errorMsg = pcall(data.CallBack)
 								if not success then
-									warn("[CALLBACK ERROR]:", errorMsg)
+									syde:Report("Element callback", errorMsg)
 								end
 							else
 								warn("[CALLBACK MISSING]: No Function Assigned To", data.Title)
@@ -3666,7 +4045,7 @@ function syde:Init(library)
 					end)
 
 					if not success then
-						warn("[CALLBACK ERROR][" .. toggle.Name .. "]: " .. tostring(errorMsg))
+						syde:Report("Toggle '" .. toggle.Name .. "' callback", errorMsg)
 					end
 				end)
 
@@ -3819,7 +4198,7 @@ function syde:Init(library)
 
 						local connection
 						connection = userinput.InputBegan:Connect(function(input, processed)
-							if not processed and input.UserInputType == Enum.UserInputType.Keyboard then
+							if not userinput:GetFocusedTextBox() and syde:IsBindableInput(input) then
 								setKeybind(input.KeyCode)
 								connection:Disconnect()
 							end
@@ -3827,7 +4206,7 @@ function syde:Init(library)
 					end)
 
 					userinput.InputBegan:Connect(function(input, processed)
-						if not processed and data.Keybind and data.KeybindReady and input.KeyCode == data.Keybind then
+						if not userinput:GetFocusedTextBox() and data.Keybind and data.KeybindReady and input.KeyCode == data.Keybind then
 							data.V = not data.V
 							UpdateToggleUI(data.V)
 
@@ -3836,7 +4215,7 @@ function syde:Init(library)
 									data.CallBack(data.V)
 								end)
 								if not success then
-									warn("[CALLBACK ERROR][" .. toggle.Name .. "]: " .. tostring(errorMsg))
+									syde:Report("Toggle '" .. toggle.Name .. "' callback", errorMsg)
 								end
 							end
 						end
@@ -3897,7 +4276,7 @@ function syde:Init(library)
 					end)
 
 					if not success then
-						warn("[CALLBACK ERROR][" .. toggle.Name .. "]: " .. tostring(errorMsg))
+						syde:Report("Toggle '" .. toggle.Name .. "' callback", errorMsg)
 					end
 
 				end
@@ -3952,14 +4331,19 @@ function syde:Init(library)
 				end
 
 				-- Main input handler
-				syde:AddConnection(userinput.InputBegan, function(input)
-					if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-
+				syde:AddConnection(userinput.InputBegan, function(input, processed)
 					if data.WaitingForKey then
-						data.WaitingForKey = false
-						SetKeybind(input.KeyCode)
+						if syde:IsBindableInput(input) then
+							data.WaitingForKey = false
+							SetKeybind(input.KeyCode)
+						end
 						return
 					end
+
+					-- don't fire the bind while typing in a textbox (ignore processed so
+					-- keys the game also uses, e.g. RightShift shift-lock, still work)
+					if userinput:GetFocusedTextBox() then return end
+					if input.KeyCode == Enum.KeyCode.Unknown then return end
 
 					if input.KeyCode == data.Key then
 						data.Hold = true
@@ -3978,7 +4362,7 @@ function syde:Init(library)
 						local success, result = pcall(data.CallBack)
 						if not data.Holding then
 							if not success then
-								warn(`[Keybind: {KeyBind.Name}] Callback Error: {result}`)
+								syde:Report("Keybind '" .. KeyBind.Name .. "' callback", result)
 							end
 						else
 							if data.Hold then
@@ -4604,6 +4988,14 @@ function syde:Init(library)
 					end
 				end
 
+				-- copy hex / rgb to clipboard
+				syde:OnClick(colorpicker.HueValues.HEX.Copy, function()
+					if syde:SetClipboard(FormatColor(data.Color, 'Hex')) then syde:FlashCopy(colorpicker.HueValues.HEX.Copy) end
+				end)
+				syde:OnClick(colorpicker.HueValues.RGB.Copy, function()
+					if syde:SetClipboard(FormatColor(data.Color, 'RGB', 2)) then syde:FlashCopy(colorpicker.HueValues.RGB.Copy) end
+				end)
+
 				local function AddRecentColor(newColor)
 					local recentFrame = colorpicker.colorPlaceHolder:Clone()
 					recentFrame.Visible = true
@@ -5224,6 +5616,26 @@ function syde:Init(library)
 				end
 
 				SetDropdownOptions()
+
+				function data:GetSelected()
+					return SelectedOrder[1]
+				end
+
+				function data:SetOptions(newOptions, starter)
+					data.Options = newOptions or {}
+					data.StarterOption = starter
+					for _, child in ipairs(dropdown.dropholder.drop.Container:GetChildren()) do
+						if child:IsA("Frame") and child.Name ~= "Option" then
+							child:Destroy()
+						end
+					end
+					SelectedOptions = {}
+					SelectedOrder = {}
+					dropdown.dropholder.drop.selected.Text = data.PlaceHolder
+					SetDropdownOptions()
+				end
+
+				return data
 			end
 
 			function telement:Slider(Slider)
@@ -5285,7 +5697,7 @@ function syde:Init(library)
 
 					syde:replayLoadTweens(Slider.slide.slideframe)
 
-					local decimalPlaces = tostring(Options.Increment):match("%.([^0]*)") and #tostring(Options.Increment):match("%.([^0]*)") or 0
+					local decimalPlaces = syde:DecimalPlaces(Options.Increment)
 					Slider.v.Text = string.format("<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>", Options.StarterValue, Options.Range[2])
 
 					local function BuildTicks(slide, options)
@@ -5355,7 +5767,6 @@ function syde:Init(library)
 							existingTicks[i]:Destroy()
 						end
 
-						--	print("✅ Created", tickCount, "ticks")
 					end
 
 					-- Connect AbsoluteSize change **only once**
@@ -5389,6 +5800,7 @@ function syde:Init(library)
 							local range = Options.Range[2] - Options.Range[1]
 							local newValue = Options.Range[1] + sliderPosition * range
 							newValue = math.floor((newValue - Options.Range[1]) / Options.Increment + 0.5) * Options.Increment + Options.Range[1]
+							newValue = syde:RoundTo(newValue, syde:DecimalPlaces(Options.Increment))
 
 							-- Update the slider visual position
 							local snapPosition = (newValue - Options.Range[1]) / range
@@ -5396,7 +5808,7 @@ function syde:Init(library)
 
 
 							-- Update the displayed value
-							local decimalPlaces = tostring(Options.Increment):match("%.([^0]*)") and #tostring(Options.Increment):match("%.([^0]*)") or 0
+							local decimalPlaces = syde:DecimalPlaces(Options.Increment)
 							Slider.v.Text = string.format("<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>", newValue, Options.Range[2])
 
 
@@ -5406,7 +5818,7 @@ function syde:Init(library)
 								Options.CallBack(newValue)
 							end)
 							if not success then
-								warn("[CALLBACK ERROR][" .. Slider.Name .. "]: " .. tostring(errorMsg))
+								syde:Report("Slider '" .. Slider.Name .. "' callback", errorMsg)
 							end
 
 							Options.StarterValue = newValue
@@ -5456,6 +5868,7 @@ function syde:Init(library)
 
 						-- snap value to increment (same logic as UpdateSlider)
 						NewVal = math.floor((NewVal - Options.Range[1]) / Options.Increment + 0.5) * Options.Increment + Options.Range[1]
+						NewVal = syde:RoundTo(NewVal, syde:DecimalPlaces(Options.Increment))
 
 						local sliderPosition = (NewVal - Options.Range[1]) / range
 
@@ -5476,9 +5889,7 @@ function syde:Init(library)
 						)
 
 						-- detect decimal places from increment
-						local decimalPlaces = tostring(Options.Increment):match("%.([^0]*)")
-							and #tostring(Options.Increment):match("%.([^0]*)")
-							or 0
+						local decimalPlaces = syde:DecimalPlaces(Options.Increment)
 
 						-- update display (decimal safe)
 						Slider.v.Text = string.format(
@@ -5498,11 +5909,14 @@ function syde:Init(library)
 						end)
 
 						if not success then
-							warn(`[ Slider Error: { Slider.Name } ] Callback Error: { result }`)
+							syde:Report("Slider '" .. Slider.Name .. "' callback", result)
 						end
 
 						Options.StarterValue = NewVal
 					end
+
+					-- click the value to type a custom number (reverts if outside range)
+					syde:AttachSliderInput(Slider, Options)
 
 					if Options.SFlag then
 						if Options.SFlag then
@@ -5686,7 +6100,7 @@ function syde:Init(library)
 						data.CallBack(text)
 					end)
 					if not success then
-						warn("Error in TextInput callback [" .. textinput.Name .. "]: " .. tostring(errorMsg))
+						syde:Report("TextInput '" .. textinput.Name .. "' callback", errorMsg)
 					end
 				end
 
@@ -5697,7 +6111,7 @@ function syde:Init(library)
 						data.CallBack(textBox.Text)
 					end)
 					if not success then
-						warn("Error in TextInput callback [" .. textinput.Name .. "]: " .. tostring(errorMsg))
+						syde:Report("TextInput '" .. textinput.Name .. "' callback", errorMsg)
 					end
 
 					if data.ClearOnLost then
@@ -5715,7 +6129,7 @@ function syde:Init(library)
 						data.CallBack(textBox.Text)
 					end)
 					if not success then
-						warn("Error in TextInput callback [" .. textinput.Name .. "]: " .. tostring(errorMsg))
+						syde:Report("TextInput '" .. textinput.Name .. "' callback", errorMsg)
 					end
 
 					if data.ClearOnLost then
@@ -5729,6 +6143,13 @@ function syde:Init(library)
 				end)
 
 
+			end
+
+			-- guard every builder so a failed element shows the banner instead of breaking the UI
+			for _bn, _bf in pairs(telement) do
+				if type(_bf) == "function" then
+					telement[_bn] = syde:Guard("Building a '" .. tostring(_bn) .. "' element", _bf)
+				end
 			end
 
 			return telement
@@ -5746,7 +6167,6 @@ function syde:Init(library)
 			Key = uitoggle,
 			OnKeyChanged = function(newKey)
 				uitoggle = newKey
-				print(newKey)
 			end,
 			CallBack = function()
 				ToggleUI()
@@ -5958,7 +6378,6 @@ function syde:Init(library)
 					StarterValue = dragSpeed,
 					CallBack = function(v)
 						dragSpeed = v
-						print(dragSpeed)
 					end,
 					SFlag = 'DSmoothness',
 					SettingConfig = true
@@ -6024,6 +6443,19 @@ function syde:Init(library)
 				LockToScreen = v
 			end,
 			SFlag = 'LS'
+		})
+
+		a:Toggle({
+			Title = 'Watermark',
+			Description = 'Toggles the draggable watermark display.',
+			Value = true,
+			CallBack = function (v)
+				local wm = ui:FindFirstChild('minihome')
+				if wm then
+					wm.Visible = v
+				end
+			end,
+			SFlag = 'WTRMK'
 		})
 
 
@@ -6236,18 +6668,124 @@ function syde:Init(library)
 			})
 		end
 
+		-- // Configurations
+		local currentConfigName = syde.ConfigFile or "Config"
+		local selectedConfig
+		local autoloadEnabled = syde:GetAutoLoad() and true or false
+		local autoloadButtonRef
+		local configDropdownData
+
+		local function refreshConfigList()
+			if configDropdownData and configDropdownData.SetOptions then
+				configDropdownData:SetOptions(syde:ListConfigs() or {})
+			end
+		end
+
+		local function updateAutoLoadLabel()
+			if autoloadButtonRef and autoloadButtonRef:FindFirstChild('title') then
+				autoloadButtonRef.title.Text = autoloadEnabled and 'AutoLoad: ON' or 'AutoLoad: OFF'
+				autoloadButtonRef.title.Size = UDim2.new(0, 120, 0, 35)
+			end
+		end
+
+		local function resolveConfigName()
+			if selectedConfig and selectedConfig ~= "" then return selectedConfig end
+			if currentConfigName and currentConfigName ~= "" then return currentConfigName end
+			return syde.ConfigFile
+		end
+
 		a:Button({
 			Title = 'Save',
-			Description = 'Save all setting configurations.',
 			CallBack = function ()
+				local name = (currentConfigName and currentConfigName ~= "") and currentConfigName or syde.ConfigFile
+				syde:SaveConfigAs(name)
 				syde:SaveSettingsConfig()
+				refreshConfigList()
 			end
 		})
 		a:Button({
 			Title = 'Load',
-			Description = 'Load all setting configurations.',
 			CallBack = function ()
+				local name = resolveConfigName()
+				syde:LoadSaveConfig(name)
 				syde:LoadSettingsConfig()
+			end
+		})
+		a:Button({
+			Title = 'AutoLoad',
+			CallBack = function ()
+				autoloadEnabled = not autoloadEnabled
+				syde:SetAutoLoad(autoloadEnabled)
+				updateAutoLoadLabel()
+				if syde.Toast then
+					syde:Toast({ Content = 'AutoLoad: ' .. (autoloadEnabled and 'ON' or 'OFF'), Duration = 3 })
+				end
+			end
+		})
+		a:Button({
+			Title = 'Overwrite',
+			CallBack = function ()
+				local name = resolveConfigName()
+				if not name or name == "" then
+					if syde.Toast then syde:Toast({ Content = 'No config to overwrite', Duration = 3 }) end
+					return
+				end
+				syde:SaveConfigAs(name)
+				syde:SaveSettingsConfig()
+				if syde.Toast then syde:Toast({ Content = 'Overwrote: ' .. name, Duration = 3 }) end
+				refreshConfigList()
+			end
+		})
+
+		-- Arrange the four buttons in a 2x2 grid
+		do
+			local themePage = window.settings.pages:FindFirstChild('Theme')
+			if themePage then
+				local saveBtn = themePage:FindFirstChild('Save')
+				local loadBtn = themePage:FindFirstChild('Load')
+				local autoloadBtn = themePage:FindFirstChild('AutoLoad')
+				local overwriteBtn = themePage:FindFirstChild('Overwrite')
+				autoloadButtonRef = autoloadBtn
+				updateAutoLoadLabel()
+
+				local grid = Instance.new('Frame')
+				grid.Name = 'ConfigButtons'
+				grid.BackgroundTransparency = 1
+				grid.BorderSizePixel = 0
+				grid.Size = UDim2.new(1, -35, 0, 90)
+				grid.Parent = themePage
+
+				local gridLayout = Instance.new('UIGridLayout')
+				gridLayout.CellSize = UDim2.new(0.5, -5, 0, 40)
+				gridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
+				gridLayout.FillDirectionMaxCells = 2
+				gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+				gridLayout.Parent = grid
+
+				for i, btn in ipairs({saveBtn, loadBtn, autoloadBtn, overwriteBtn}) do
+					if btn then
+						btn.Parent = grid
+						btn.LayoutOrder = i
+					end
+				end
+			end
+		end
+
+		a:TextInput({
+			Title = 'Config Name',
+			PlaceHolder = 'Enter config name',
+			ClearOnLost = false,
+			CallBack = function (v)
+				currentConfigName = v
+			end
+		})
+
+		configDropdownData = a:Dropdown({
+			Title = 'Saved Configs',
+			Options = syde:ListConfigs() or {},
+			PlaceHolder = 'Select a config',
+			CallBack = function (v)
+				selectedConfig = v
 			end
 		})
 
@@ -6689,6 +7227,11 @@ function syde:Init(library)
 				return
 			end
 
+			-- hide the Home screen if we're jumping straight from it (e.g. via search)
+			if Data.Home.Enabled and tbdata.homeActive then
+				HideHomeForTab()
+			end
+
 			-- update title (same logic as click)
 			ChangeName(tabName)
 
@@ -6928,7 +7471,7 @@ function syde:Init(library)
 					if data.CallBack then
 						local success, errorMsg = pcall(c)
 						if not success then
-							warn(`[ Button Error: { button.Name } ] Callback Error: { errorMsg }`)
+							syde:Report("Button '" .. button.Name .. "' callback", errorMsg)
 
 						end
 					else
@@ -7002,7 +7545,7 @@ function syde:Init(library)
 						if data.CallBack then
 							local success, errorMsg = pcall(data.CallBack)
 							if not success then
-								warn("[CALLBACK ERROR]:", errorMsg)
+								syde:Report("Element callback", errorMsg)
 							end
 						else
 							warn("[CALLBACK MISSING]: No Function Assigned To", data.Title)
@@ -7134,9 +7677,8 @@ function syde:Init(library)
 				end)
 
 				if not success then
-					warn("[CALLBACK ERROR][" .. toggle.Name .. "]: " .. tostring(errorMsg))
+					syde:Report("Toggle '" .. toggle.Name .. "' callback", errorMsg)
 				end
-				SaveConfig()
 			end)
 
 			--[DESC]
@@ -7288,7 +7830,7 @@ function syde:Init(library)
 
 					local connection
 					connection = userinput.InputBegan:Connect(function(input, processed)
-						if not processed and input.UserInputType == Enum.UserInputType.Keyboard then
+						if not userinput:GetFocusedTextBox() and syde:IsBindableInput(input) then
 							setKeybind(input.KeyCode)
 							connection:Disconnect()
 						end
@@ -7296,7 +7838,7 @@ function syde:Init(library)
 				end)
 
 				userinput.InputBegan:Connect(function(input, processed)
-					if not processed and data.Keybind and data.KeybindReady and input.KeyCode == data.Keybind then
+					if not userinput:GetFocusedTextBox() and data.Keybind and data.KeybindReady and input.KeyCode == data.Keybind then
 						data.V = not data.V
 						UpdateToggleUI(data.V)
 
@@ -7305,9 +7847,8 @@ function syde:Init(library)
 								data.CallBack(data.V)
 							end)
 							if not success then
-								warn("[CALLBACK ERROR][" .. toggle.Name .. "]: " .. tostring(errorMsg))
+								syde:Report("Toggle '" .. toggle.Name .. "' callback", errorMsg)
 							end
-							SaveConfig()
 						end
 
 
@@ -7357,9 +7898,6 @@ function syde:Init(library)
 			end)
 
 			function data:Set(NewValue, skipSave)
-
-				if data.V == NewValue then return end -- prevent duplicate calls
-
 				data.V = NewValue
 				UpdateToggleUI(NewValue)
 
@@ -7368,24 +7906,15 @@ function syde:Init(library)
 						data.CallBack(data.V)
 					end)
 					if not success then
-						warn("[CALLBACK ERROR][" .. toggle.Name .. "]: " .. tostring(errorMsg))
+						syde:Report("Toggle '" .. toggle.Name .. "' callback", errorMsg)
 					end
 				end
-
-				-- ALWAYS save unless explicitly skipped (like during LoadConfig)
-				if not skipSave then
-					SaveConfig()
-				end
 			end
 
-			-- If config already loaded before element creation
-			if syde.ConfigEnabled and data.Flag and syde.Flags[data.Flag] and syde.Flags[data.Flag].V ~= nil then
-				data:Set(syde.Flags[data.Flag].V, true)
-			end
-
-			if syde.ConfigEnabled then
-				if data.Flag then
-					syde.Flags[data.Flag] = data
+			if syde.ConfigEnabled and data.Flag then
+				syde.Flags[data.Flag] = data
+				if syde.LoadedConfig and syde.LoadedConfig[data.Flag] ~= nil then
+					data:Set(syde.LoadedConfig[data.Flag], true)
 				end
 			end
 
@@ -7453,7 +7982,8 @@ function syde:Init(library)
 
 				syde:replayLoadTweens(Slider.slide.slideframe)
 
-				Slider.v.Text = string.format("<font size='14'>%d</font><font color='#434343'>/%d</font>", Options.StarterValue, Options.Range[2])
+				local decimalPlaces = syde:DecimalPlaces(Options.Increment)
+				Slider.v.Text = string.format("<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>", Options.StarterValue, Options.Range[2])
 
 				local function BuildTicks(slide, options)
 					local ticksFrame = slide:FindFirstChild("Ticks")
@@ -7522,7 +8052,6 @@ function syde:Init(library)
 						existingTicks[i]:Destroy()
 					end
 
-					--	print("✅ Created", tickCount, "ticks")
 				end
 
 				-- Connect AbsoluteSize change **only once**
@@ -7556,6 +8085,7 @@ function syde:Init(library)
 						local range = Options.Range[2] - Options.Range[1]
 						local newValue = Options.Range[1] + sliderPosition * range
 						newValue = math.floor((newValue - Options.Range[1]) / Options.Increment + 0.5) * Options.Increment + Options.Range[1]
+						newValue = syde:RoundTo(newValue, syde:DecimalPlaces(Options.Increment))
 
 						-- Update the slider visual position
 						local snapPosition = (newValue - Options.Range[1]) / range
@@ -7570,7 +8100,8 @@ function syde:Init(library)
 
 
 						-- Update the displayed value
-						Slider.v.Text = string.format("<font size='14'>%d</font><font color='#434343'>/%d</font>", newValue, Options.Range[2])
+						local decimalPlaces = syde:DecimalPlaces(Options.Increment)
+						Slider.v.Text = string.format("<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>", newValue, Options.Range[2])
 
 						tweenservice:Create(Slider.Title, TweenInfo.new(0.55, Enum.EasingStyle.Exponential), {TextTransparency = 0}):Play()
 
@@ -7578,12 +8109,11 @@ function syde:Init(library)
 							Options.CallBack(newValue)
 						end)
 						if not success then
-							warn("[CALLBACK ERROR][" .. Slider.Name .. "]: " .. tostring(errorMsg))
+							syde:Report("Slider '" .. Slider.Name .. "' callback", errorMsg)
 						end
 
 
 						Options:Set(newValue)
-						SaveConfig()
 
 					end
 				end
@@ -7648,7 +8178,8 @@ function syde:Init(library)
 					) 
 
 					-- Update value display
-					Slider.v.Text = string.format("<font size='14'>%d</font><font color='#434343'>/%d</font>", tostring(NewVal), Options.Range[2])
+					local decimalPlaces = syde:DecimalPlaces(Options.Increment)
+					Slider.v.Text = string.format("<font size='14'>%." .. decimalPlaces .. "f</font><font color='#434343'>/%." .. decimalPlaces .. "f</font>", NewVal, Options.Range[2])
 
 					-- Tween title appearance
 					tweenservice:Create(Slider.Title, TweenInfo.new(0.55, Enum.EasingStyle.Exponential), {
@@ -7660,16 +8191,19 @@ function syde:Init(library)
 						Options.CallBack(NewVal)
 					end)
 					if not success then
-						warn(`[ Slider Error: { slider.Name } ] Callback Error: { result }`)
+						syde:Report("Slider '" .. slider.Name .. "' callback", result)
 					end
 
 					Options.StarterValue = NewVal
-					SaveConfig()
 				end
 
-				if syde.ConfigEnabled then
-					if Options.Flag then
-						syde.Flags[Options.Flag] = Options
+				-- click the value to type a custom number (reverts if outside range)
+				syde:AttachSliderInput(Slider, Options)
+
+				if syde.ConfigEnabled and Options.Flag then
+					syde.Flags[Options.Flag] = Options
+					if syde.LoadedConfig and syde.LoadedConfig[Options.Flag] ~= nil then
+						Options:Set(syde.LoadedConfig[Options.Flag], true)
 					end
 				end
 
@@ -7756,14 +8290,19 @@ function syde:Init(library)
 			end
 
 			-- Main input handler
-			syde:AddConnection(userinput.InputBegan, function(input)
-				if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-
+			syde:AddConnection(userinput.InputBegan, function(input, processed)
 				if data.WaitingForKey then
-					data.WaitingForKey = false
-					SetKeybind(input.KeyCode)
+					if syde:IsBindableInput(input) then
+						data.WaitingForKey = false
+						SetKeybind(input.KeyCode)
+					end
 					return
 				end
+
+				-- don't fire the bind while typing in a textbox (ignore processed so
+				-- keys the game also uses, e.g. RightShift shift-lock, still work)
+				if userinput:GetFocusedTextBox() then return end
+				if input.KeyCode == Enum.KeyCode.Unknown then return end
 
 				if input.KeyCode == data.Key then
 					data.Hold = true
@@ -7782,7 +8321,7 @@ function syde:Init(library)
 					local success, result = pcall(data.CallBack)
 					if not data.Holding then
 						if not success then
-							warn(`[Keybind: {KeyBind.Name}] Callback Error: {result}`)
+							syde:Report("Keybind '" .. KeyBind.Name .. "' callback", result)
 						end
 					else
 						if data.Hold then
@@ -7893,7 +8432,7 @@ function syde:Init(library)
 					data.CallBack(text)
 				end)
 				if not success then
-					warn("Error in TextInput callback [" .. textinput.Name .. "]: " .. tostring(errorMsg))
+					syde:Report("TextInput '" .. textinput.Name .. "' callback", errorMsg)
 				end
 			end
 
@@ -7904,7 +8443,7 @@ function syde:Init(library)
 					data.CallBack(textBox.Text)
 				end)
 				if not success then
-					warn("Error in TextInput callback [" .. textinput.Name .. "]: " .. tostring(errorMsg))
+					syde:Report("TextInput '" .. textinput.Name .. "' callback", errorMsg)
 				end
 
 				if data.ClearOnLost then
@@ -7922,7 +8461,7 @@ function syde:Init(library)
 					data.CallBack(textBox.Text)
 				end)
 				if not success then
-					warn("Error in TextInput callback [" .. textinput.Name .. "]: " .. tostring(errorMsg))
+					syde:Report("TextInput '" .. textinput.Name .. "' callback", errorMsg)
 				end
 
 				if data.ClearOnLost then
@@ -9260,6 +9799,14 @@ function syde:Init(library)
 				end
 			end
 
+			-- copy hex / rgb to clipboard
+			syde:OnClick(colorpicker.HueValues.HEX.Copy, function()
+				if syde:SetClipboard(FormatColor(data.Color, 'Hex')) then syde:FlashCopy(colorpicker.HueValues.HEX.Copy) end
+			end)
+			syde:OnClick(colorpicker.HueValues.RGB.Copy, function()
+				if syde:SetClipboard(FormatColor(data.Color, 'RGB', 2)) then syde:FlashCopy(colorpicker.HueValues.RGB.Copy) end
+			end)
+
 			local function AddRecentColor(newColor)
 				local recentFrame = colorpicker.colorPlaceHolder:Clone()
 				recentFrame.Visible = true
@@ -9325,7 +9872,6 @@ function syde:Init(library)
 					SV:Disconnect()
 					SV = nil
 					AddRecentColor(data.Color)
-					SaveConfig()
 				end
 			end)
 
@@ -9347,7 +9893,6 @@ function syde:Init(library)
 					HUE:Disconnect()
 					HUE = nil
 					AddRecentColor(data.Color)
-					SaveConfig()
 				end
 			end)
 
@@ -9542,15 +10087,16 @@ function syde:Init(library)
 				HSV[1], HSV[2], HSV[3] = h, s, v
 
 				updatestuff()
-
-				if not skipSave then
-					SaveConfig()
-				end
 			end
 
-			if syde.ConfigEnabled then
-				if data.Flag then
-					syde.Flags[data.Flag] = data
+			if syde.ConfigEnabled and data.Flag then
+				syde.Flags[data.Flag] = data
+				if syde.LoadedConfig and syde.LoadedConfig[data.Flag] ~= nil then
+					local saved = syde.LoadedConfig[data.Flag]
+					local unpacked = syde:ColorUnpack(saved)
+					if typeof(unpacked) == "Color3" then
+						data:Set(unpacked, true)
+					end
 				end
 			end
 
@@ -9560,32 +10106,10 @@ function syde:Init(library)
 
 		end
 
-		function syde:LoadSaveConfig()
-			local notified = false
-			local loaded = false
-
-			if syde.ConfigEnabled then
-				syde:Toast({
-					Content = 'Loading Save File Please Do Not Close';
-					Duration = 3
-				})
-				task.wait(1)
-				local success, result = pcall(function()
-					local filePath = string.format("%s/%s.json", syde.ConfigFolder, syde.ConfigFile)
-					if isfile and isfile(filePath) then
-						loaded = LoadConfig(readfile(filePath))
-					end
-				end)
-
-				if success then
-					syde:Toast({
-						Content = 'Loaded Save File';
-						Duration = 3
-					})
-					print("Configuration loaded successfully from a previous session.")
-				elseif not success then
-					warn("[SYDE] Configurations Error " .. tostring(result))
-				end
+		-- guard every builder so a failed element shows the banner instead of breaking the UI
+		for _bn, _bf in pairs(initelement) do
+			if type(_bf) == "function" then
+				initelement[_bn] = syde:Guard("Building a '" .. tostring(_bn) .. "' element", _bf)
 			end
 		end
 
